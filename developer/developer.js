@@ -12,7 +12,7 @@ const devTabs=[...document.querySelectorAll('.developer-tab')],devPanels=[...doc
 function activateDeveloperTab(tab){const valid=devTabs.map(b=>b.dataset.devTab);if(!valid.includes(tab))tab='resources';devTabs.forEach(b=>b.classList.toggle('active',b.dataset.devTab===tab));devPanels.forEach(p=>p.classList.toggle('hidden',p.dataset.devPanel!==tab));history.replaceState(null,'',`${location.pathname}${location.search}#${tab}`);}
 devTabs.forEach(b=>b.addEventListener('click',()=>activateDeveloperTab(b.dataset.devTab)));
 
-let previewOptions={departments:[],profiles:[],accounts:[]};
+let previewOptions={departments:[],staffUnits:[],profiles:[],accounts:[]};
 function previewSectionsText(sections){return (sections||[]).map(x=>portalLabels[x]||x).join(', ')||'No sections';}
 function updatePreviewAccountOptions(){
   const department=document.getElementById('previewDepartment')?.value||'';
@@ -32,10 +32,11 @@ function updatePreviewMode(){
 }
 async function loadPreviewOptions(){
   previewOptions=await getJson('/api/developer/preview-options');
-  const department=document.getElementById('previewDepartment'),operationsDepartment=document.getElementById('operationsDepartment'),profile=document.getElementById('previewProfile');
+  const department=document.getElementById('previewDepartment'),operationsDepartment=document.getElementById('operationsDepartment'),profile=document.getElementById('previewProfile'),staffUnit=document.getElementById('staffPreviewUnit');
   if(department){department.innerHTML=(previewOptions.departments||[]).map(d=>`<option value="${esc(d.slug)}">${esc(d.name)}</option>`).join('');}
   if(operationsDepartment){operationsDepartment.innerHTML=(previewOptions.departments||[]).map(d=>`<option value="${esc(d.slug)}" ${d.slug==='education'?'selected':''}>${esc(d.name)}</option>`).join('');}
   if(profile){profile.innerHTML=(previewOptions.profiles||[]).map(p=>`<option value="${esc(p.id)}">${esc(p.label)} · ${esc(roleLabels[p.role]||p.role)}</option>`).join('');}
+  if(staffUnit){staffUnit.innerHTML=(previewOptions.staffUnits||[]).map(unit=>`<option value="${esc(unit.id)}">${esc(unit.label)}</option>`).join('');}
   updatePreviewAccountOptions();updatePreviewProfileHelp();updatePreviewMode();
 }
 
@@ -51,6 +52,7 @@ async function launchOperationsPortal(destination){
 }
 document.getElementById('openPayrollPortal')?.addEventListener('click',()=>launchOperationsPortal('payroll'));
 document.getElementById('openAuditorPortal')?.addEventListener('click',()=>launchOperationsPortal('auditor'));
+document.getElementById('openStaffPreview')?.addEventListener('click',async()=>{const unit=document.getElementById('staffPreviewUnit')?.value||'',button=document.getElementById('openStaffPreview'),status=document.getElementById('staffPreviewStatus');const target=window.open('about:blank','_blank');button.disabled=true;status.className='status';status.textContent='Creating secure developer preview session…';try{const data=await getJson('/api/developer/staff-preview-session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({unit})});status.className='status ok';status.textContent=`Opening ${data.previewLabel} without a staff login.`;if(target)target.location.href=data.redirect;else location.href=data.redirect;}catch(error){if(target)target.close();status.className='status bad';status.textContent=error.message||'Could not open the functional-unit portal.';}finally{button.disabled=false;}});
 
 async function loadResources(){const data=await getJson('/api/developer/resources');document.getElementById('resourceCount').textContent=data.length;document.getElementById('resourceRows').innerHTML=data.map((r,i)=>`<tr><td>${i+1}</td><td><span class="resource-title">${esc(r.title)}${r.builtIn?'<span class="builtin">BUILT-IN</span>':''}</span>${r.description?`<span class="resource-desc">${esc(r.description)}</span>`:''}</td><td>${esc(r.originalName)}${r.size?`<br><small>${esc(size(r.size))}</small>`:''}</td><td>${(r.departments||[]).length?(r.departments||[]).map(d=>`<span class="tag">${esc(deptLabels[d]||d)}</span>`).join(''):'<span class="tag">All departments</span>'}</td><td>${(r.portals||[]).map(p=>`<span class="tag">${esc(portalLabels[p]||p)}</span>`).join('')}</td><td>${esc(fmt(r.uploadedAt))}</td><td><a class="download" href="${esc(r.downloadUrl)}">Download</a>${r.canDelete?` <button class="danger" onclick="removeResource('${esc(r.id)}')">Delete</button>`:''}</td></tr>`).join('');}
 function accountState(a){if(!a.active)return {label:'Disabled',cls:'inactive-pill',detail:''};if(a.passwordSet)return {label:'Ready',cls:'active-pill',detail:a.passwordSetAt?`Password set ${fmt(a.passwordSetAt)}`:''};if(a.invitationEmailStatus==='failed')return {label:'Email failed',cls:'failed-pill',detail:a.invitationLastError||''};if(a.invitationExpired)return {label:'Invite expired',cls:'expired-pill',detail:a.invitationExpiresAt?`Expired ${fmt(a.invitationExpiresAt)}`:''};if(a.invitationEmailStatus==='sent')return {label:'Awaiting setup',cls:'pending-pill',detail:a.invitationExpiresAt?`Expires ${fmt(a.invitationExpiresAt)}`:''};return {label:'Invitation pending',cls:'pending-pill',detail:''};}

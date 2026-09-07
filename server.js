@@ -3170,9 +3170,19 @@ app.get('/api/developer/preview-options', developerAuth, async(_req,res)=>{
   const accounts=(await readAdminUsers()).filter(a=>a.active!==false).map(publicAdminUser);
   res.json({
     departments:Object.entries(DEPARTMENTS).map(([slug,dept])=>({slug,name:dept.name})),
+    staffUnits:Object.entries(STAFF_UNITS).map(([id,unit])=>({id,label:unit.label})),
     profiles:Object.entries(DEVELOPER_PREVIEW_PROFILES).map(([id,p])=>({id,label:p.label,role:p.role,sections:p.sections})),
     accounts
   });
+});
+app.post('/api/developer/staff-preview-session', developerAuth, async(req,res)=>{
+  const unit=String(req.body?.unit||'').trim();
+  if(!Object.prototype.hasOwnProperty.call(STAFF_UNITS,unit)) return res.status(400).json({error:'Choose a valid functional unit.'});
+  const expiresAt=new Date(Date.now()+DEVELOPER_PREVIEW_TTL_MS).toISOString();
+  const identity={id:`developer-preview:staff:${unit}`,name:`Developer Preview · ${STAFF_UNITS[unit].label}`,username:DEVELOPER_ADMIN_USER,role:'administrator',units:[unit],departments:Object.keys(DEPARTMENTS),sections:['project-work','field-experience','dissertation','assessor','payroll','auditor'],developerPreview:true,developerPreviewLabel:STAFF_UNITS[unit].label,previewExpiresAt:expiresAt};
+  const token=createAdminSession(identity,'__staff__',DEVELOPER_PREVIEW_TTL_MS);
+  res.cookie('ucc_admin_session',token,{httpOnly:true,secure:req.secure||String(req.headers['x-forwarded-proto']||'').includes('https'),sameSite:'lax',maxAge:DEVELOPER_PREVIEW_TTL_MS,path:'/'});
+  res.json({ok:true,redirect:unit==='student-support'?'/support-admin':'/staff',expiresAt,previewLabel:STAFF_UNITS[unit].label});
 });
 app.post('/api/developer/preview-session', developerAuth, async(req,res)=>{
   try {
