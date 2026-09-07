@@ -1,0 +1,19 @@
+UCC CoDE Academic Submission Portal v24
+
+FIELD EXPERIENCE AND TEACHING PRACTICE ONLY
+
+1. Resources now contain six separate Excel template downloads:
+   - Field Experience I & II
+   - Field Experience III & IV
+   - Field Experience V
+   - Micro-Teaching
+   - Macro-Teaching
+   - Reflection
+2. Public Field Experience and Teaching Practice portal now uses study-centre checkboxes and permits multiple study-centre selections.
+3. Field Experience I & II remains one submission sheet, but approved outputs are split into individual Field Experience I and Field Experience II reports.
+4. Field Experience III & IV remains one submission sheet, but approved outputs are split into individual Field Experience III and Field Experience IV reports.
+5. The admin portal provides separate report controls for Field Experience I, II, III, IV, V, Micro-Teaching, Macro-Teaching and Reflection.
+6. Each individual report has: Consolidated Scores, Programme by Centre ZIP, Master Scores and Register.
+7. All report score rows are sorted by Registration number.
+8. Programme by Centre uses the first three registration-number segments, e.g. BCF/CR/01/22/0002 -> BCF/CR/01.
+9. These changes do not alter Undergraduate Project Work, Dissertation, or Assessment/Vetting workflows.

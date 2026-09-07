@@ -1,0 +1,30 @@
+UCC Submission Portal v10 patch over v9
+
+Replace these files in the existing repository:
+- server.js
+- package.json
+- render.yaml
+- README.md
+- admin/admin.css
+- admin/admin.js
+- admin/index.html
+- developer/developer.css
+- developer/developer.js
+- developer/index.html
+- public/assessor.html
+- public/common.js
+- public/dissertation.html
+- public/index.html
+- public/project-work.html
+
+No new npm dependency was added.
+
+New optional Render environment variable:
+STUDENT_FEEDBACK_EXPIRY_DAYS=30
+
+Existing Gmail variables remain required.
+
+Runtime-created persistent data files:
+- data/admin-users.json
+- data/study-centres.json
+These are created automatically under STORAGE_DIR and do not need to be committed.

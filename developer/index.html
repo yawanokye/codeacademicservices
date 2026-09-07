@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Developer Administration Portal</title>
+  <link rel="stylesheet" href="/developer/developer.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><img src="/ucc-logo.png" alt="UCC logo"><div><div class="eyebrow">UCC Academic Submission Portals</div><h1>Developer Administration Portal</h1></div></div>
+  <div class="links"><a href="/">Public portals</a><a href="/admin">Department admin</a></div>
+</header>
+<main>
+<section class="intro"><div><div class="eyebrow">System management</div><h2>Portal Administration</h2><p>Manage resources, administrator accounts, study centres and portal-level submission requirements from separate tabs.</p></div><div class="metric-row"><div class="count-card"><span>Resources</span><strong id="resourceCount">0</strong></div><div class="count-card"><span>Admin accounts</span><strong id="adminCount">0</strong></div><div class="count-card"><span>Published centres</span><strong id="centreCount">0</strong></div><div class="count-card"><span>Centre codes</span><strong id="directoryCount">0</strong></div></div></section>
+
+<nav class="developer-tabs" aria-label="Developer administration sections">
+  <button class="developer-tab active" type="button" data-dev-tab="resources">Resources</button>
+  <button class="developer-tab" type="button" data-dev-tab="admins">Administrators</button>
+  <button class="developer-tab" type="button" data-dev-tab="centres">Study Centres</button>
+  <button class="developer-tab" type="button" data-dev-tab="settings">Portal Settings</button>
+  <button class="developer-tab" type="button" data-dev-tab="operations">Payroll &amp; Auditor</button>
+  <button class="developer-tab" type="button" data-dev-tab="preview">Portal Preview</button>
+</nav>
+
+<div class="developer-panel" data-dev-panel="resources">
+  <section class="card upload-card"><h3>Publish a Resource</h3><form id="resourceForm" enctype="multipart/form-data"><div class="grid"><label>Resource Title <span>*</span><input name="title" required maxlength="180"></label><label class="wide">Description<textarea name="description" maxlength="1000" rows="3"></textarea></label></div><fieldset><legend>Publish for Department(s) <span>*</span></legend><label class="check"><input type="checkbox" name="departments" value="education"> Education Programmes</label><label class="check"><input type="checkbox" name="departments" value="business"> Business Programmes</label><label class="check"><input type="checkbox" name="departments" value="arts-social-sciences"> Arts &amp; Social Sciences</label><label class="check"><input type="checkbox" name="departments" value="science-mathematics"> Science &amp; Mathematics</label></fieldset><fieldset><legend>Show this resource on <span>*</span></legend><label class="check"><input type="checkbox" name="portals" value="project-work"> Undergraduate Project Work</label><label class="check"><input type="checkbox" name="portals" value="field-experience"> Field Experience and Teaching Practice</label><label class="check"><input type="checkbox" name="portals" value="dissertation"> Dissertation Submission</label><label class="check"><input type="checkbox" name="portals" value="assessor"> Assessment Report Submission</label></fieldset><label class="file-label">Resource File <span>*</span><input type="file" name="resourceFile" required accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.txt,.zip,.png,.jpg,.jpeg"></label><div class="actions"><div id="resourceStatus" class="status"></div><button id="uploadBtn" type="submit">Upload Resource</button></div></form></section>
+  <section class="card"><div class="section-head"><div><h3>Published Resources</h3><p>Developer-uploaded resources can be removed. Built-in resources remain protected.</p></div><button id="refreshResources" class="secondary" type="button">Refresh</button></div><div class="table-wrap"><table><thead><tr><th>S/N</th><th>Resource</th><th>File</th><th>Department(s)</th><th>Appears On</th><th>Uploaded</th><th>Actions</th></tr></thead><tbody id="resourceRows"></tbody></table></div></section>
+</div>
+
+<div class="developer-panel hidden" data-dev-panel="admins">
+  <section class="card admin-card-section"><h3>Create Individual Administrator Account</h3><p>Assign the person to one or more departments and submission sections. The system emails a one-time password setup link.</p><form id="adminForm"><div class="grid three"><label>Administrator Name <span>*</span><input name="name" required maxlength="160" autocomplete="name"></label><label>Email Address <span>*</span><input name="email" type="email" required maxlength="254" autocomplete="email"></label><label>Username <small>(optional)</small><input name="username" maxlength="100" autocomplete="off" placeholder="Defaults to email address"></label><label>Role <span>*</span><select name="role" required><option value="viewer">Viewer, read/download only</option><option value="officer">Officer, manage assignments/forwarding</option><option value="administrator">Administrator, full section access including deletion</option></select></label></div><fieldset><legend>Department access <span>*</span></legend><label class="check"><input type="checkbox" name="departments" value="education"> Education Programmes</label><label class="check"><input type="checkbox" name="departments" value="business"> Business Programmes</label><label class="check"><input type="checkbox" name="departments" value="arts-social-sciences"> Arts & Social Sciences</label><label class="check"><input type="checkbox" name="departments" value="science-mathematics"> Science & Mathematics</label></fieldset><fieldset><legend>Submission section access <span>*</span></legend><label class="check"><input type="checkbox" name="sections" value="project-work"> Undergraduate Project Work</label><label class="check"><input type="checkbox" name="sections" value="field-experience"> Field Experience and Teaching Practice</label><label class="check"><input type="checkbox" name="sections" value="dissertation"> Dissertation Submission</label><label class="check"><input type="checkbox" name="sections" value="assessor"> Assessment Report Submission</label><label class="check"><input type="checkbox" name="sections" value="payroll"> Payroll Portal</label><label class="check"><input type="checkbox" name="sections" value="auditor"> Auditor's Portal (read-only verification)</label></fieldset><div class="actions"><div id="adminStatus" class="status"></div><button id="createAdminBtn" type="submit">Create Administrator</button></div></form></section>
+  <section class="card"><div class="section-head"><div><h3>Individual Administrator Accounts</h3><p>Manage account status and resend password setup or reset links.</p></div><button id="refreshAdmins" class="secondary" type="button">Refresh</button></div><div class="table-wrap"><table><thead><tr><th>S/N</th><th>Name / Email / Username</th><th>Role</th><th>Departments</th><th>Sections</th><th>Account Status</th><th>Actions</th></tr></thead><tbody id="adminRows"></tbody></table></div></section>
+</div>
+
+<div class="developer-panel hidden" data-dev-panel="centres">
+  <section class="card centres-card">
+    <div class="section-head"><div><h3>Published Study Centres by Department</h3><p>Add a centre with its official code and department assignments. Use Enable or Disable for temporary public removal without deleting the centre record or code.</p></div></div>
+    <div class="management-grid">
+      <form id="singleCentreForm" class="mini-form"><h4>Add or Restore One Study Centre</h4><div class="grid three"><label>ID <small>(optional)</small><input name="id" maxlength="20"></label><label>Centre Code <span>*</span><input name="code" required maxlength="40" placeholder="e.g. CR/01"></label><label>Official Study Centre Name <span>*</span><input name="name" required maxlength="180" placeholder="e.g. Cape Coast Centre"></label></div><fieldset class="centre-departments"><legend>Department(s) <span>*</span></legend><label><input type="checkbox" name="departments" value="education"> Department of Education Programmes</label><label><input type="checkbox" name="departments" value="business"> Department of Business Programmes</label><label><input type="checkbox" name="departments" value="arts-social-sciences"> Department of Arts and Social Sciences</label><label><input type="checkbox" name="departments" value="science-mathematics"> Department of Science and Mathematics Programmes</label></fieldset><div class="actions"><div id="singleCentreStatus" class="status"></div><button id="addSingleCentreBtn" type="submit">Save and Enable Centre</button></div></form>
+      <form id="centreForm" class="mini-form" enctype="multipart/form-data"><h4>Replace a Department Centre List</h4><label class="file-label">Study Centres CSV <span>*</span><input name="studyCentresCsv" type="file" accept=".csv" required></label><p class="help">One centre per row in the first column. This action replaces the list only for the department(s) selected below.</p><fieldset class="centre-departments"><legend>Department(s) <span>*</span></legend><label><input type="checkbox" name="departments" value="education"> Department of Education Programmes</label><label><input type="checkbox" name="departments" value="business"> Department of Business Programmes</label><label><input type="checkbox" name="departments" value="arts-social-sciences"> Department of Arts and Social Sciences</label><label><input type="checkbox" name="departments" value="science-mathematics"> Department of Science and Mathematics Programmes</label></fieldset><div class="actions"><div id="centreStatus" class="status"></div><div class="button-row"><button class="secondary" id="resetCentres" type="button">Restore Approved Centre Lists</button><button id="uploadCentresBtn" type="submit">Replace Selected Lists</button></div></div></form>
+    </div>
+    <div id="centreTags" class="centre-tags centre-groups"></div>
+  </section>
+
+  <section class="card centres-card"><div class="section-head"><div><h3>Study Centre Code Directory</h3><p>The directory supplies the official centre name used in consolidated reports. Disable a centre for temporary removal from every public dropdown, then enable it later without losing its code or department assignments.</p></div><a class="secondary" href="/api/developer/study-centre-directory.xlsx">Download Current Directory</a></div>
+    <form id="singleCentreDirectoryForm" class="mini-form inline-directory-form"><h4>Update One Centre Record</h4><div class="grid three"><label>ID <small>(optional)</small><input name="id" maxlength="20"></label><label>Centre Code <span>*</span><input name="code" required maxlength="40" placeholder="e.g. CR/01"></label><label>Official Study Centre Name <span>*</span><input name="name" required maxlength="180"></label></div><fieldset class="centre-departments"><legend>Add to Department(s) <small>(optional)</small></legend><label><input type="checkbox" name="departments" value="education"> Education</label><label><input type="checkbox" name="departments" value="business"> Business</label><label><input type="checkbox" name="departments" value="arts-social-sciences"> Arts and Social Sciences</label><label><input type="checkbox" name="departments" value="science-mathematics"> Science and Mathematics</label></fieldset><div class="actions"><div id="singleCentreDirectoryStatus" class="status"></div><button id="saveSingleCentreDirectoryBtn" type="submit">Update Centre Record</button></div></form>
+    <form id="centreDirectoryForm" class="bulk-directory-form" enctype="multipart/form-data"><label class="file-label">Replace Directory from Excel/CSV <span>*</span><input name="studyCentreDirectoryFile" type="file" accept=".xlsx,.xls,.csv" required></label><p class="help">Required columns: <strong>CODE</strong> and <strong>CENTER_NAME</strong> or <strong>CENTRE_NAME</strong>. ID is optional. Imported centres are enabled and published to the selected departments.</p><fieldset class="centre-departments"><legend>Department(s) <span>*</span></legend><label><input type="checkbox" name="departments" value="education"> Education</label><label><input type="checkbox" name="departments" value="business"> Business</label><label><input type="checkbox" name="departments" value="arts-social-sciences"> Arts and Social Sciences</label><label><input type="checkbox" name="departments" value="science-mathematics"> Science and Mathematics</label></fieldset><div class="actions"><div id="centreDirectoryStatus" class="status"></div><div class="button-row"><button class="secondary" id="resetCentreDirectory" type="button">Restore Approved Directory and Lists</button><button id="uploadCentreDirectoryBtn" type="submit">Replace Directory</button></div></div></form>
+    <div class="table-wrap"><table><thead><tr><th>S/N</th><th>ID</th><th>Code</th><th>Study Centre</th><th>Department(s)</th><th>Status</th><th>Action</th></tr></thead><tbody id="centreDirectoryRows"></tbody></table></div>
+  </section>
+</div>
+
+<div class="developer-panel hidden" data-dev-panel="settings">
+  <section class="card settings-card"><div class="section-head"><div><h3>Field Experience and Teaching Practice</h3><p>Control whether a Claim Form is optional or compulsory on this public submission portal. This setting does not affect Project Work, Dissertation or Assessment/Vetting portals.</p></div></div>
+    <form id="portalSettingsForm"><div class="grid"><label>Claim Form Requirement <span>*</span><select id="fieldExperienceClaimRequirement" name="fieldExperienceClaimRequirement" required><option value="optional">Optional</option><option value="required">Compulsory</option></select></label></div><div class="actions"><div id="portalSettingsStatus" class="status"></div><button id="savePortalSettingsBtn" type="submit">Save Portal Setting</button></div></form>
+  </section>
+</div>
+
+<div class="developer-panel hidden" data-dev-panel="operations">
+  <section class="card operations-launch-card">
+    <div class="section-head"><div><h3>Central Payroll and Auditor Access</h3><p>Payroll and Auditor access is managed here, separately from Department Administration. Select the starting department, then open the required portal. The portal itself allows authorised switching between departments and activities.</p></div></div>
+    <div class="preview-notice"><strong>Developer operations sessions last 30 minutes.</strong> Payroll actions are live and recorded as Developer Preview actions. The Auditor Portal remains read only.</div>
+    <div class="operations-launch-grid">
+      <label>Starting Department <span>*</span><select id="operationsDepartment" required></select></label>
+      <article class="operations-launch-option"><div><span class="operations-icon">P</span><div><h4>Payroll Portal</h4><p>Process only department-approved claims. Filter by department, activity and Field Experience option.</p></div></div><button id="openPayrollPortal" type="button">Open Payroll Portal</button></article>
+      <article class="operations-launch-option"><div><span class="operations-icon">A</span><div><h4>Auditor's Portal</h4><p>Verify only claims that Payroll has marked Approved for Payment or Paid.</p></div></div><button id="openAuditorPortal" type="button">Open Auditor's Portal</button></article>
+    </div>
+    <div id="operationsLaunchStatus" class="status" aria-live="polite"></div>
+  </section>
+</div>
+
+<div class="developer-panel hidden" data-dev-panel="preview">
+  <section class="card preview-card">
+    <div class="section-head"><div><h3>Portal Preview / Passwordless Developer Login</h3><p>Open a department, Payroll or Auditor portal without entering that user's password. Use a standard preview role or reproduce the permissions of an existing active administrator account.</p></div></div>
+    <div class="preview-notice"><strong>Developer preview sessions last 30 minutes.</strong> The target portal displays a visible preview banner. If you use an Administrator or Officer profile, any action you perform is a real action and is recorded as a Developer Preview action.</div>
+    <form id="previewForm">
+      <div class="grid three">
+        <label>Department <span>*</span><select id="previewDepartment" name="department" required></select></label>
+        <label>Destination Portal <span>*</span><select id="previewDestination" name="destination" required><option value="admin">Department Administration Portal</option><option value="payroll">Payroll Portal</option><option value="auditor">Auditor's Portal</option></select></label>
+        <label>Preview Method <span>*</span><select id="previewMode" name="mode" required><option value="profile">Use a standard preview role</option><option value="account">View exactly as an existing administrator</option></select></label>
+      </div>
+      <div id="previewProfileBlock" class="preview-choice-block"><label>Preview Role <span>*</span><select id="previewProfile" name="profileId"></select></label><p id="previewProfileHelp" class="help"></p></div>
+      <div id="previewAccountBlock" class="preview-choice-block hidden"><label>Existing Administrator <span>*</span><select id="previewAccount" name="accountId"><option value="">Select an administrator</option></select></label><p id="previewAccountHelp" class="help">Only active accounts assigned to the selected department are shown. No password is read or exposed.</p></div>
+      <div class="actions"><div id="previewStatus" class="status"></div><div class="button-row"><button id="launchPreviewBtn" type="submit">Open Portal Without Password</button></div></div>
+    </form>
+  </section>
+  <section class="card">
+    <div class="section-head"><div><h3>Public Submission Portals</h3><p>These portals do not require login. Open them directly to check what submitters see.</p></div></div>
+    <div class="public-preview-links"><a class="preview-link" href="/project-work.html" target="_blank" rel="noopener">Undergraduate Project Work</a><a class="preview-link" href="/field-experience.html" target="_blank" rel="noopener">Field Experience and Teaching Practice</a><a class="preview-link" href="/dissertation.html" target="_blank" rel="noopener">Dissertation Submission</a><a class="preview-link" href="/assessor.html" target="_blank" rel="noopener">Assessment Report Submission</a></div>
+  </section>
+</div>
+</main>
+<script src="/developer/developer.js"></script>
+</body>
+</html>

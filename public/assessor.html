@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Assessment / Vetting Report Submission</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="topbar"><div class="brand"><img src="/ucc-logo.png" alt="UCC logo"><div><h1>Assessment / Vetting Report Submission</h1><small>Assessor / Vetter Submission Portal</small></div></div><div class="top-actions"><a class="navlink" href="/">← All portals</a><a class="navlink login-link" href="/admin-login.html">Login</a></div></header>
+<main class="page-wrap portal-page">
+  <div class="page-intro"><div class="eyebrow">Public Portal 3</div><h2>Submit Assessment or Vetting Reports</h2><p>Select the report type and receiving department. If you received a secure assignment email, use the single assignment workspace link in that email to download assigned works and submit each report. Use this public form only for manual or exceptional submissions not created through an assignment.</p></div>
+  <div class="submission-layout">
+    <form id="form" class="form-card">
+      <input type="hidden" id="assignmentToken" name="assignmentToken" value="">
+      <datalist id="titleOptions"><option value="Mr"><option value="Mrs"><option value="Ms"><option value="Miss"><option value="Dr"><option value="Prof."><option value="Rev."><option value="Ing."><option value="Esq."></datalist>
+      <div id="assignmentBanner" class="validation" hidden></div>
+      <section class="section destination-section">
+        <h3>Report Type and Department</h3>
+        <div class="grid2">
+          <div class="field"><label>Report Submission Type <span class="req">*</span></label><select id="reportType" name="reportType" required><option value="assessment">Assessment Report</option><option value="vetting">Vetting Report</option></select><span class="hint">Fresh dissertation assignments use Assessment Report. Vetting is normally used for revised submissions.</span></div>
+          <div class="field"><label>Department <span class="req">*</span></label><select id="department" name="department" required><option value="">Select department</option><option value="education">Department of Education Programmes</option><option value="business">Department of Business Programmes</option><option value="arts-social-sciences">Department of Arts and Social Sciences</option><option value="science-mathematics">Department of Science and Mathematics Programmes</option></select></div>
+        </div>
+      </section>
+      <section class="section">
+        <h3>Assessor details</h3>
+        <div class="grid3"><div class="field"><label>Title <span class="req">*</span></label><input id="assessorTitle" name="assessorTitle" list="titleOptions" required placeholder="e.g. Prof."></div><div class="field"><label>First Name <span class="req">*</span></label><input id="assessorFirstName" name="assessorFirstName" required autocomplete="given-name"></div><div class="field"><label>Surname / Last Name <span class="req">*</span></label><input id="assessorLastName" name="assessorLastName" required autocomplete="family-name"></div></div>
+        <div class="grid2"><div class="field"><label>Telephone Number <span class="req">*</span></label><input id="phone" name="phone" required></div><div class="field"><label>Email <span class="req">*</span></label><input id="email" name="email" type="email" required></div><div class="field"><label>Number of Reports Being Submitted <span class="req">*</span></label><input id="workCount" name="workCount" type="number" min="1" max="25" step="1" value="1" required><span class="hint">The portal creates one student and upload section for each report.</span></div></div>
+      </section>
+      <section class="section"><h3>Students and accompanying documents</h3><p id="workInstructions" class="section-note">Complete each work separately. Every student must have one report, one claim form and one score sheet. The reviewed dissertation upload is optional.</p><div id="workEntries" class="assessment-work-list"></div></section>
+      <div class="actions"><span class="hint">All work sections are stored together under this assessor in the departmental admin portal.</span><button id="submitBtn" class="btn" type="submit">Submit Reports</button></div><div id="status" class="status"></div>
+    </form>
+    <aside id="resourcesSection" class="resource-section resource-aside" hidden><h3>Resources</h3><p class="section-note">Download templates and documents for this submission.</p><div id="resourceList" class="resource-list"></div></aside>
+  </div>
+</main>
+<footer>University of Cape Coast · Assessment / Vetting Report Submission</footer>
+<script src="/common.js"></script>
+<script>
+loadPortalResources('assessor');
+const form=document.getElementById('form'),btn=document.getElementById('submitBtn'),status=document.getElementById('status');
+const workCount=document.getElementById('workCount'),workEntries=document.getElementById('workEntries'),reportType=document.getElementById('reportType'),department=document.getElementById('department');
+const assignmentToken=document.getElementById('assignmentToken'),assignmentBanner=document.getElementById('assignmentBanner');
+let assignmentContext=null;
+const qs=new URLSearchParams(location.search),token=qs.get('assignment')||'';
+function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));}
+function countValue(){return Math.min(25,Math.max(1,Number.parseInt(workCount.value,10)||1));}
+function snapshotEntries(){return [...workEntries.querySelectorAll('.assessment-work-card')].map(card=>({studentFirstName:card.querySelector('[data-field="studentFirstName"]')?.value||'',studentLastName:card.querySelector('[data-field="studentLastName"]')?.value||'',indexNumber:card.querySelector('[data-field="indexNumber"]')?.value||'',programme:card.querySelector('[data-field="programme"]')?.value||''}));}
+function workCard(i,data={},locked=false){const n=i+1,ro=locked?'readonly aria-readonly="true"':'';const label=(reportType.value==='vetting'?'Vetting':'Assessment');return `<article class="assessment-work-card"><div class="work-card-head"><div><span class="work-number">Work ${n}</span><h4>Student ${n} and documents</h4></div><span class="work-required">${label} ${n}</span></div><div class="grid2"><div class="field"><label>Student First Name <span class="req">*</span></label><input data-field="studentFirstName" name="studentFirstName_${i}" required ${ro} value="${escapeHtml(data.studentFirstName||'')}"></div><div class="field"><label>Student Surname / Last Name <span class="req">*</span></label><input data-field="studentLastName" name="studentLastName_${i}" required ${ro} value="${escapeHtml(data.studentLastName||'')}"></div><div class="field"><label>Index Number <span class="req">*</span></label><input data-field="indexNumber" name="indexNumber_${i}" required ${ro} value="${escapeHtml(data.indexNumber||'')}"></div><div class="field"><label>Programme <span class="req">*</span></label><input data-field="programme" name="programme_${i}" required ${ro} value="${escapeHtml(data.programme||'')}"></div></div>${locked?'<div class="hint">Student identity and email are securely linked to the dissertation assignment. The email is retained by the system for forwarding feedback and is not editable here.</div>':''}<div class="work-upload-grid"><div class="field"><label>${label} Report <span class="req">*</span></label><input name="reportFile_${i}" type="file" accept=".pdf,.doc,.docx" required></div><div class="field"><label>Claim Form <span class="req">*</span></label><input name="claimForm_${i}" type="file" accept=".pdf,.doc,.docx" required></div><div class="field"><label>Score Sheet <span class="req">*</span></label><input name="scoreSheet_${i}" type="file" accept=".xlsx,.xls,.csv,.pdf,.doc,.docx" required></div><div class="field"><label>Reviewed Dissertation <span class="hint inline-hint">Optional</span></label><input name="dissertationFile_${i}" type="file" accept=".pdf,.doc,.docx"></div></div></article>`;}
+function renderWorkEntries(){if(assignmentContext){workEntries.innerHTML=assignmentContext.works.map((w,i)=>workCard(i,w,true)).join('');return;}const old=snapshotEntries(),n=countValue();workCount.value=String(n);workEntries.innerHTML=Array.from({length:n},(_,i)=>workCard(i,old[i]||{},false)).join('');}
+function lock(el,value){el.value=value||'';el.disabled=true;el.classList.add('locked-field');}
+async function loadAssignmentContext(){if(token){location.replace(`/secure/dissertations/${encodeURIComponent(token)}`);return;}renderWorkEntries();}
+department.addEventListener('change',()=>loadPortalResources('assessor','resourcesSection','resourceList',department.value));
+workCount.addEventListener('input',renderWorkEntries);workCount.addEventListener('change',renderWorkEntries);reportType.addEventListener('change',renderWorkEntries);
+form.addEventListener('submit',async e=>{e.preventDefault();if(!form.reportValidity())return;try{await submitForm(form,'/api/assessor',status,btn);if(!assignmentContext){workCount.value='1';renderWorkEntries();}}catch{}});
+loadAssignmentContext();
+</script>
+</body></html>

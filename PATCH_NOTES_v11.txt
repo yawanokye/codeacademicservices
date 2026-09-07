@@ -1,0 +1,23 @@
+UCC Submission Portal v11 patch
+
+Changed files required over v10:
+1. server.js
+2. admin/index.html
+3. admin/admin.js
+4. admin/admin.css
+5. public/assessor.html
+6. public/styles.css
+
+What changed:
+- Fresh and revised dissertation submissions are separate tables in the department admin portal.
+- Assessment and vetting report submissions are separate tables in the department admin portal.
+- Public assessor portal now supports Assessment Report or Vetting Report.
+- Dissertation assignment dialog now records Assessment or Vetting.
+- Fresh dissertations can only be assigned for Assessment.
+- Fresh and revised dissertations cannot be mixed in one assignment.
+- Secure assignment emails and secure dissertation page link to an assignment-bound report submission form.
+- Assignment-bound form auto-fills/locks department, report type, assessor identity, student names, index numbers, programmes and work count.
+- Student email is bound server-side to the exact dissertation submission and is not editable/exposed in the assessor form.
+- Report submission link remains usable through the 8-week assignment due date unless revoked, even if the dissertation download link expires earlier.
+- Fresh dissertations can only receive Assessment feedback.
+- Student feedback ZIP contains only report + optional reviewed dissertation. Claim form is excluded.

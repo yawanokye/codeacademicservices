@@ -1,0 +1,21 @@
+V13 PATCH - INDIVIDUAL ADMIN EMAIL INVITATIONS
+
+Changed files:
+- server.js
+- developer/index.html
+- developer/developer.js
+- developer/developer.css
+- README.md
+
+New file:
+- public/admin-set-password.html
+
+Behaviour:
+1. Developer creates an individual administrator with name, email, optional username, role, department(s), and section(s).
+2. No permanent password is entered by the developer.
+3. System emails a one-time password setup link using the existing Gmail API configuration.
+4. Invitation expires after 24 hours by default. Optional: ADMIN_INVITATION_EXPIRY_HOURS.
+5. User opens the link and chooses a password of at least 10 characters.
+6. One-time link is invalidated immediately after successful use.
+7. Developer dashboard shows invitation/account status and can resend an invitation.
+8. For an already active individual admin, the resend action becomes a password-reset email. Existing password remains valid until the reset is completed.

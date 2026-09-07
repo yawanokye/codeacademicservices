@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>UCC Auditor Portal</title>
+  <link rel="stylesheet" href="/operations/portal.css">
+</head>
+<body class="operations-page auditor-page">
+<header class="topbar">
+  <div class="brand"><img src="/ucc-logo.png" alt="UCC logo"><div><h1>Auditor's Portal</h1><small id="departmentName">Payroll-Approved Claims</small></div></div>
+  <div class="links"><a href="/developer#operations">Developer Portal</a><a href="/">Public portals</a><button id="logoutBtn" type="button">Logout</button></div>
+</header>
+<main>
+  <section class="intro compact-intro">
+    <div><div class="eyebrow">Read only, Payroll gate enforced</div><h2>Payment Claim Verification</h2><p>Select a department and activity. Only claims marked Approved for Payment or Paid by Payroll appear here.</p></div>
+    <div class="actions"><a id="approvedRegister" class="btn" href="#">Payment-Approved Register</a><a id="auditRegister" class="btn primary" href="#">Auditor Register</a></div>
+  </section>
+  <section class="card operations-card">
+    <div class="operations-filters auditor-filters">
+      <label>Department<select id="departmentFilter"></select></label>
+      <label>Activity<select id="activityFilter">
+        <option value="all">All activities</option>
+        <option value="project-work">Undergraduate Project Work</option>
+        <optgroup label="Field Experience and Teaching Practice">
+          <option value="field-experience">All Field Experience and Teaching Practice</option>
+          <option value="field-experience-1-2">Field Experience I &amp; II</option>
+          <option value="field-experience-3-4">Field Experience III &amp; IV</option>
+          <option value="field-experience-5">Field Experience V</option>
+          <option value="micro-teaching">Micro-Teaching</option>
+          <option value="macro-teaching">Macro-Teaching</option>
+          <option value="reflection">Reflection</option>
+        </optgroup>
+        <optgroup label="Dissertation">
+          <option value="dissertation-assessment">Dissertation Assessment</option>
+          <option value="dissertation-vetting">Dissertation Vetting</option>
+        </optgroup>
+      </select></label>
+      <label>Payroll Status<select id="statusFilter"><option value="all">Approved and Paid</option><option value="approved-for-payment">Approved for Payment</option><option value="paid">Paid</option></select></label>
+      <label class="search-filter">Search<input id="search" type="search" placeholder="Reference, claimant, centre or category"></label>
+    </div>
+    <div class="result-count"><strong id="count">0</strong> payment-approved claims</div>
+    <div class="table-wrap operations-table-wrap">
+      <table class="operations-table auditor-table">
+        <colgroup><col class="c-sn"><col class="c-claim"><col class="c-claimant"><col class="c-approved"><col class="c-quantities"><col class="c-checks"><col class="c-payroll"><col class="c-updated"></colgroup>
+        <thead><tr><th>S/N</th><th>Claim and Activity</th><th>Claimant</th><th>Department Approval</th><th>Quantities</th><th>Claim Check</th><th>Payroll Decision</th><th>Last Update</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div id="empty" class="empty" hidden>No claims match the selected department and activity, or no claim has reached Approved for Payment.</div>
+  </section>
+</main>
+<dialog id="claimDialog" class="modal"><div class="modal-head"><strong id="claimTitle">Claim Form</strong><button id="closeClaim" class="close" type="button">×</button></div><iframe id="claimFrame" title="Claim form preview"></iframe></dialog>
+<script src="/operations/auditor.js"></script>
+</body>
+</html>

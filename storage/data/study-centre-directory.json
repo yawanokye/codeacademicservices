@@ -1,0 +1,1189 @@
+{
+  "version": 2,
+  "updatedAt": "2026-09-05",
+  "source": "code_centres2. (1)(2).xlsx",
+  "centres": [
+    {
+      "id": 374,
+      "code": "AH/30",
+      "name": "AHAFO REGION",
+      "enabled": true
+    },
+    {
+      "id": 17,
+      "code": "AS/01",
+      "name": "WESLEY COLLEGE OF EDUCATION, KUMASI",
+      "enabled": true
+    },
+    {
+      "id": 14,
+      "code": "AS/02",
+      "name": "KUMASI ANGLICAN SECONDARY SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 16,
+      "code": "AS/03",
+      "name": "OBUASI SENIOR HIGH TECHNICAL SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 12,
+      "code": "AS/04",
+      "name": "KUMASI POLYTECHNIC",
+      "enabled": true
+    },
+    {
+      "id": 20,
+      "code": "AS/05",
+      "name": "SERWAA NYARKO SENIOR HIGH SCHOOL, KUMASI",
+      "enabled": true
+    },
+    {
+      "id": 15,
+      "code": "AS/06",
+      "name": "MAMPONG TECHNICAL COLLEGE OF EDUCATION, MAMPONG-ASHANTI",
+      "enabled": true
+    },
+    {
+      "id": 13,
+      "code": "AS/07",
+      "name": "KONONGO ODUMASE SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 19,
+      "code": "AS/08",
+      "name": "DWAMENA AKENTEN SENIOR HIGH SCHOOL, OFFINSO",
+      "enabled": true
+    },
+    {
+      "id": 18,
+      "code": "AS/09",
+      "name": "MMOFRATURO SCHOOL, KUMASI",
+      "enabled": true
+    },
+    {
+      "id": 21,
+      "code": "AS/10",
+      "name": "T. I. AHMADIYYA SENIOR HIGH SCHOOL, KUMASI",
+      "enabled": true
+    },
+    {
+      "id": 22,
+      "code": "AS/11",
+      "name": "SIMMS SENIOR HIGH SCHOOL, KUMASI",
+      "enabled": true
+    },
+    {
+      "id": 24,
+      "code": "AS/12",
+      "name": "KUMASI TECHNICAL INSTITUTE",
+      "enabled": true
+    },
+    {
+      "id": 25,
+      "code": "AS/13",
+      "name": "MANSOMAN SENIOR HIGH SCHOOL, MANSO ATWERE",
+      "enabled": true
+    },
+    {
+      "id": 80,
+      "code": "AS/14",
+      "name": "KUMASI SENIOR HIGH TECHNICAL SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 81,
+      "code": "AS/15",
+      "name": "NKAWIE SENIOR HIGH TECHNICAL SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 23,
+      "code": "AS/16",
+      "name": "AGOGO SHS",
+      "enabled": true
+    },
+    {
+      "id": 99,
+      "code": "AS/17",
+      "name": "KUMASI INSTITUTE OF LANGUAGES",
+      "enabled": true
+    },
+    {
+      "id": 126,
+      "code": "AS/18",
+      "name": "TEPA SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 168,
+      "code": "AS/19",
+      "name": "HOLY TRINITY LUTHERAN SCHOOL, KUMASI",
+      "enabled": true
+    },
+    {
+      "id": 203,
+      "code": "AS/20",
+      "name": "AKROKERRI COLLEGE OF EDUCATION",
+      "enabled": true
+    },
+    {
+      "id": 204,
+      "code": "AS/21",
+      "name": "SAINT LOUIS COLLEGE OF EDUCATION",
+      "enabled": true
+    },
+    {
+      "id": 347,
+      "code": "AS/22",
+      "name": "UNIVERSITY OF CAPE COAST DOMINASE CAMPUS",
+      "enabled": true
+    },
+    {
+      "id": 371,
+      "code": "AS/30",
+      "name": "ASHANTI REGION",
+      "enabled": true
+    },
+    {
+      "id": 386,
+      "code": "AS/31",
+      "name": "KUMASI",
+      "enabled": true
+    },
+    {
+      "id": 403,
+      "code": "AS/32",
+      "name": "CHRIST THE TEACHER COLLEGE OF EDUCATION, KUMASI",
+      "enabled": true
+    },
+    {
+      "id": 417,
+      "code": "AS/33",
+      "name": "AKROKERRI COLLEGE OF EDUCATION, AKROKERRI",
+      "enabled": true
+    },
+    {
+      "id": 418,
+      "code": "AS/34",
+      "name": "OFFINSO COLLEGE OF EDUCATION, OFFINSO",
+      "enabled": true
+    },
+    {
+      "id": 419,
+      "code": "AS/35",
+      "name": "AGOGO PRESBYTERIAN WOMENS COLLEGE OF EDUCATION, AGOGO",
+      "enabled": true
+    },
+    {
+      "id": 426,
+      "code": "AS/36",
+      "name": "ST. LOUIS COLLEGE OF EDUCATION - KUMASI",
+      "enabled": true
+    },
+    {
+      "id": 26,
+      "code": "BA/01",
+      "name": "SUNYANI TECHNICAL UNIVERSITY",
+      "enabled": true
+    },
+    {
+      "id": 27,
+      "code": "BA/02",
+      "name": "TECHIMAN SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 29,
+      "code": "BA/03",
+      "name": "DORMAA SENIOR HIGH SCHOOL, DORMAA AHENKRO",
+      "enabled": true
+    },
+    {
+      "id": 28,
+      "code": "BA/04",
+      "name": "HWIDIEM SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 30,
+      "code": "BA/05",
+      "name": "KINTAMPO SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 31,
+      "code": "BA/06",
+      "name": "DROBO SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 32,
+      "code": "BA/07",
+      "name": "NKORANZA SENIOR HIGH TECHNICAL SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 94,
+      "code": "BA/08",
+      "name": "NKORANMAN SENIOR HIGH SCHOOL, SEIKWA",
+      "enabled": true
+    },
+    {
+      "id": 98,
+      "code": "BA/09",
+      "name": "IDEALS PROFESSIONAL COLLEGE - FIAPRE",
+      "enabled": true
+    },
+    {
+      "id": 127,
+      "code": "BA/10",
+      "name": "WENCHI AGRICULTURAL COLLEGE",
+      "enabled": true
+    },
+    {
+      "id": 171,
+      "code": "BA/11",
+      "name": "SUNYANI SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 186,
+      "code": "BA/12",
+      "name": "ATEBUBU SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 190,
+      "code": "BA/13",
+      "name": "SIBCO-SUNYANI",
+      "enabled": true
+    },
+    {
+      "id": 331,
+      "code": "BA/14",
+      "name": "GYARKO COMMUNITY DAY SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 332,
+      "code": "BA/15",
+      "name": "WENCHI METHODIST SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 341,
+      "code": "BA/16",
+      "name": "DREAMFIELD INTERNATIONAL SCHOOL, SUNYANI",
+      "enabled": true
+    },
+    {
+      "id": 373,
+      "code": "BA/30",
+      "name": "BONO EAST REGION",
+      "enabled": true
+    },
+    {
+      "id": 397,
+      "code": "BA/32",
+      "name": "TECHIMAN",
+      "enabled": true
+    },
+    {
+      "id": 404,
+      "code": "BA/33",
+      "name": "GREENFILED UNIVERSITY COLLEGE - SUNYANI",
+      "enabled": true
+    },
+    {
+      "id": 415,
+      "code": "BA/34",
+      "name": "AL-FARUQ COLLEGE OF EDUCATION, WENCHI",
+      "enabled": true
+    },
+    {
+      "id": 428,
+      "code": "BA/35",
+      "name": "BEREKUM COLLEGE OF EDUCATION - BEREKUM",
+      "enabled": true
+    },
+    {
+      "id": 429,
+      "code": "BA/36",
+      "name": "ATEBUBU COLLEGE OF EDUCATION - ATEBUBU",
+      "enabled": true
+    },
+    {
+      "id": 372,
+      "code": "BR/30",
+      "name": "BONO REGION",
+      "enabled": true
+    },
+    {
+      "id": 387,
+      "code": "BR/31",
+      "name": "SUNYANI",
+      "enabled": true
+    },
+    {
+      "id": 67,
+      "code": "CR/01",
+      "name": "UNIVERSITY OF CAPE COAST",
+      "enabled": true
+    },
+    {
+      "id": 68,
+      "code": "CR/02",
+      "name": "SWEDRU SCHOOL OF BUSINESS",
+      "enabled": true
+    },
+    {
+      "id": 69,
+      "code": "CR/03",
+      "name": "OBIRI YEBOAH SENIOR HIGH SCHOOL, ASSIN FOSU",
+      "enabled": true
+    },
+    {
+      "id": 70,
+      "code": "CR/04",
+      "name": "SWEDRU SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 72,
+      "code": "CR/05",
+      "name": "BOA AMPONSEM SENIOR HIGH SCHOOL, DUNKWA-ON-OFFIN",
+      "enabled": true
+    },
+    {
+      "id": 71,
+      "code": "CR/06",
+      "name": "BREMAN ASIKUMA SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 86,
+      "code": "CR/07",
+      "name": "NGLESHIE AMANFRO SENIOR HIGH SCHOOL, KASOA",
+      "enabled": true
+    },
+    {
+      "id": 75,
+      "code": "CR/08",
+      "name": "TWIFO PRASO SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 74,
+      "code": "CR/09",
+      "name": "APAM SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 76,
+      "code": "CR/10",
+      "name": "KASOA DATUS COMPLEX",
+      "enabled": true
+    },
+    {
+      "id": 73,
+      "code": "CR/11",
+      "name": "ATLANTIC WESLEYAN COLLEGE KASOA",
+      "enabled": true
+    },
+    {
+      "id": 95,
+      "code": "CR/12",
+      "name": "NGLESHI AMANFROM",
+      "enabled": true
+    },
+    {
+      "id": 100,
+      "code": "CR/13",
+      "name": "MFANTSIMAN GIRLS SHS - SALTPOND",
+      "enabled": true
+    },
+    {
+      "id": 101,
+      "code": "CR/14",
+      "name": "NORRIS JORSLING INTERNATIONAL SCHOOL, KASOA",
+      "enabled": true
+    },
+    {
+      "id": 102,
+      "code": "CR/15",
+      "name": "MARY STAR OF THE SEA INTERNATIONAL SCHOOL, KASOA",
+      "enabled": true
+    },
+    {
+      "id": 185,
+      "code": "CR/16",
+      "name": "HIGH CLASS",
+      "enabled": true
+    },
+    {
+      "id": 312,
+      "code": "CR/17",
+      "name": "UNIVERSITY OF CAPE COAST CAMPUS",
+      "enabled": true
+    },
+    {
+      "id": 342,
+      "code": "CR/18",
+      "name": "RIVER VIEW COLLEGE, TUBA-KASOA",
+      "enabled": true
+    },
+    {
+      "id": 346,
+      "code": "CR/19",
+      "name": "UNIVERSITY OF CAPE COAST NYAKROM CAMPUS",
+      "enabled": true
+    },
+    {
+      "id": 385,
+      "code": "CR/30",
+      "name": "CENTRAL REGION",
+      "enabled": true
+    },
+    {
+      "id": 394,
+      "code": "CR/31",
+      "name": "CAPE COAST",
+      "enabled": true
+    },
+    {
+      "id": 416,
+      "code": "CR/32",
+      "name": "FOSO COLLEGE OF EDUCATION, FOSU",
+      "enabled": true
+    },
+    {
+      "id": 337,
+      "code": "EACMC",
+      "name": "EJURA (EACMC",
+      "enabled": true
+    },
+    {
+      "id": 33,
+      "code": "ER/01",
+      "name": "OYOKO METHODIST SENIOR HIGH SCHOOL, KOFORIDUA",
+      "enabled": true
+    },
+    {
+      "id": 34,
+      "code": "ER/02",
+      "name": "ABETIFI PRESBYTERIAN COLLEGE OF EDUCATION, ABETIFI-KWAHU",
+      "enabled": true
+    },
+    {
+      "id": 82,
+      "code": "ER/03",
+      "name": "ATTAFUAH SENIOR HIGH SCHOOL, AKIM ODA",
+      "enabled": true
+    },
+    {
+      "id": 36,
+      "code": "ER/04",
+      "name": "GHANA SENIOR HIGH SCHOOL, KOFORIDUA",
+      "enabled": true
+    },
+    {
+      "id": 37,
+      "code": "ER/05",
+      "name": "AKWAMUMAN SENIOR HIGH SCHOOL, ATIMPOKU-AKOSOMBO",
+      "enabled": true
+    },
+    {
+      "id": 38,
+      "code": "ER/06",
+      "name": "SOMANYA SENIOR HIGH TECHNICAL SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 39,
+      "code": "ER/07",
+      "name": "BEGORO PRESBYTERIAN SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 35,
+      "code": "ER/08",
+      "name": "ODA SECONDARY TECHNICAL SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 104,
+      "code": "ER/09",
+      "name": "IGNIS SCHOOL, NSAWAM",
+      "enabled": true
+    },
+    {
+      "id": 189,
+      "code": "ER/10",
+      "name": "ASPIRE EDUCATION COMPLEX, KOFORIDUA",
+      "enabled": true
+    },
+    {
+      "id": 205,
+      "code": "ER/11",
+      "name": "KOFORIDUA TECHNICAL UNIVERSITY",
+      "enabled": true
+    },
+    {
+      "id": 167,
+      "code": "ER/12",
+      "name": "NSAWAM PRISONS",
+      "enabled": true
+    },
+    {
+      "id": 308,
+      "code": "ER/14",
+      "name": "KING JESUS SCHOOL ANNEX, KOFORIDUA",
+      "enabled": true
+    },
+    {
+      "id": 309,
+      "code": "ER/15",
+      "name": "YILO KROBO SENIOR HIGH SCHOOL, SOMANYA",
+      "enabled": true
+    },
+    {
+      "id": 350,
+      "code": "ER/16",
+      "name": "METHODIST COLLEGE OF EDUCATION, AKIM ODA",
+      "enabled": true
+    },
+    {
+      "id": 375,
+      "code": "ER/30",
+      "name": "EASTERN REGION",
+      "enabled": true
+    },
+    {
+      "id": 388,
+      "code": "ER/31",
+      "name": "KOFORIDUA",
+      "enabled": true
+    },
+    {
+      "id": 88,
+      "code": "GA/01",
+      "name": "ZENITH COLLEGE, LA-ACCRA",
+      "enabled": true
+    },
+    {
+      "id": 2,
+      "code": "GA/02",
+      "name": "ODORGONNO SENIOR HIGH SCHOOL, AWOSHIE-ACCRA",
+      "enabled": true
+    },
+    {
+      "id": 3,
+      "code": "GA/03",
+      "name": "TEMA SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 9,
+      "code": "GA/04",
+      "name": "TEMA DATUS COMPLEX",
+      "enabled": true
+    },
+    {
+      "id": 122,
+      "code": "GA/05",
+      "name": "FAFRAHA COMMUNITY SENIOR HIGH SCHOOL, ACCRA",
+      "enabled": true
+    },
+    {
+      "id": 5,
+      "code": "GA/06",
+      "name": "ADA COLLEGE OF EDUCATION, ADA-FOAH",
+      "enabled": true
+    },
+    {
+      "id": 6,
+      "code": "GA/07",
+      "name": "ST. MARGARET MARY SENIOR TECHNICAL HIGH SCHOOL, DANSOMAN-ACCRA",
+      "enabled": true
+    },
+    {
+      "id": 10,
+      "code": "GA/08",
+      "name": "EBENEZER SHS, DANSOMAN",
+      "enabled": true
+    },
+    {
+      "id": 7,
+      "code": "GA/09",
+      "name": "PAPAFIO HILLS, ACCRA",
+      "enabled": true
+    },
+    {
+      "id": 8,
+      "code": "GA/10",
+      "name": "WEST AFRICA SENIOR HIGH SCHOOL, ADENTA-ACCRA",
+      "enabled": true
+    },
+    {
+      "id": 84,
+      "code": "GA/12",
+      "name": "WESLEY GRAMMAR - DANSOMAN",
+      "enabled": true
+    },
+    {
+      "id": 85,
+      "code": "GA/13",
+      "name": "ST. PETERS LUTHERAN SCHOOL, MADINA-ACCRA",
+      "enabled": true
+    },
+    {
+      "id": 4,
+      "code": "GA/14",
+      "name": "ACCRA HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 11,
+      "code": "GA/15",
+      "name": "ST. THOMAS AQUAINAS SHS",
+      "enabled": true
+    },
+    {
+      "id": 89,
+      "code": "GA/16",
+      "name": "TEMA PARENTS",
+      "enabled": true
+    },
+    {
+      "id": 105,
+      "code": "GA/18",
+      "name": "ADA SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 107,
+      "code": "GA/19",
+      "name": "MANTE - DIN",
+      "enabled": true
+    },
+    {
+      "id": 112,
+      "code": "GA/20",
+      "name": "KLINTAPS COLLEGE OF HEALTH AND ALLIED SCIENCES, TEMA",
+      "enabled": true
+    },
+    {
+      "id": 113,
+      "code": "GA/21",
+      "name": "MARANATHA UNIVERSITY COLLEGE, SOWUTUOM ACCRA",
+      "enabled": true
+    },
+    {
+      "id": 164,
+      "code": "GA/22",
+      "name": "GHANATA SHS - DODOWA",
+      "enabled": true
+    },
+    {
+      "id": 165,
+      "code": "GA/23",
+      "name": "BUBUASHIE DATUS COMPLEX",
+      "enabled": true
+    },
+    {
+      "id": 169,
+      "code": "GA/24",
+      "name": "ST. PAULS LUTHERAN SCHOOL, KANDA-ACCRA",
+      "enabled": true
+    },
+    {
+      "id": 170,
+      "code": "GA/25",
+      "name": "TRINITY LUTHERAN SCHOOL, TEMA",
+      "enabled": true
+    },
+    {
+      "id": 298,
+      "code": "GA/26",
+      "name": "CHEMU SENIOR HIGH SCHOOL, TEMA",
+      "enabled": true
+    },
+    {
+      "id": 299,
+      "code": "GA/27",
+      "name": "DE YOUNGSTERS SCHOOL, ADENTA, ACCRA",
+      "enabled": true
+    },
+    {
+      "id": 311,
+      "code": "GA/28",
+      "name": "UNIVERSITY OF CAPE COAST PAPAFIO HILLS CAMPUS",
+      "enabled": true
+    },
+    {
+      "id": 333,
+      "code": "GA/29",
+      "name": "LASHIBI COMMUNITY SENIOR HIGH SCHOOL, SAKUMONO-TEMA",
+      "enabled": true
+    },
+    {
+      "id": 335,
+      "code": "GA/30",
+      "name": "FOUNTAIN UNIVERSITY,TEMA",
+      "enabled": true
+    },
+    {
+      "id": 370,
+      "code": "GA/40",
+      "name": "GREATER ACCRA REGION",
+      "enabled": true
+    },
+    {
+      "id": 395,
+      "code": "GA/41",
+      "name": "ACCRA",
+      "enabled": true
+    },
+    {
+      "id": 396,
+      "code": "GA/42",
+      "name": "TEMA",
+      "enabled": true
+    },
+    {
+      "id": 336,
+      "code": "KAC",
+      "name": "KWADASO (KAC)",
+      "enabled": true
+    },
+    {
+      "id": 382,
+      "code": "NE/30",
+      "name": "NORTH EAST REGION",
+      "enabled": true
+    },
+    {
+      "id": 55,
+      "code": "NR/01",
+      "name": "TAMALE TECHNICAL UNIVERSITY",
+      "enabled": true
+    },
+    {
+      "id": 56,
+      "code": "NR/02",
+      "name": "TAMALE COLLEGE OF EDUCATION",
+      "enabled": true
+    },
+    {
+      "id": 59,
+      "code": "NR/03",
+      "name": "GAMBAGA GIRLS SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 57,
+      "code": "NR/04",
+      "name": "BIMBILA COLLEGE OF EDUCATION",
+      "enabled": true
+    },
+    {
+      "id": 79,
+      "code": "NR/05",
+      "name": "TATCO",
+      "enabled": true
+    },
+    {
+      "id": 90,
+      "code": "NR/06",
+      "name": "SALAGA SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 91,
+      "code": "NR/07",
+      "name": "DAMONGO SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 97,
+      "code": "NR/08",
+      "name": "TAMALE INSTITUTE OF LANGUAGES",
+      "enabled": true
+    },
+    {
+      "id": 110,
+      "code": "NR/09",
+      "name": "GABAGABA",
+      "enabled": true
+    },
+    {
+      "id": 334,
+      "code": "NR/10",
+      "name": "BUSINESS SENIOR HIGH SCHOOL, TAMALE",
+      "enabled": true
+    },
+    {
+      "id": 380,
+      "code": "NR/30",
+      "name": "NORTHERN REGION",
+      "enabled": true
+    },
+    {
+      "id": 391,
+      "code": "NR/31",
+      "name": "TAMALE",
+      "enabled": true
+    },
+    {
+      "id": 338,
+      "code": "OAC",
+      "name": "OHAWU (OAC)",
+      "enabled": true
+    },
+    {
+      "id": 420,
+      "code": "ON",
+      "name": "ONLINE",
+      "enabled": true
+    },
+    {
+      "id": 379,
+      "code": "OT/30",
+      "name": "OTI REGION",
+      "enabled": true
+    },
+    {
+      "id": 343,
+      "code": "PAT",
+      "name": "PONG TAMALE",
+      "enabled": true
+    },
+    {
+      "id": 339,
+      "code": "SOH",
+      "name": "ABURI (SoH)",
+      "enabled": true
+    },
+    {
+      "id": 381,
+      "code": "SR/30",
+      "name": "KASOA",
+      "enabled": true
+    },
+    {
+      "id": 58,
+      "code": "UE/01",
+      "name": "ZAMSI SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 60,
+      "code": "UE/02",
+      "name": "BOLGATANGA GIRLS SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 61,
+      "code": "UE/03",
+      "name": "ZEBILLA SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 172,
+      "code": "UE/04",
+      "name": "BOLGATANGA TECHNICAL INSTITUTE",
+      "enabled": true
+    },
+    {
+      "id": 62,
+      "code": "UE/05",
+      "name": "NOTRE DAME SENIOR HIGH SCHOOL, NAVRONGO",
+      "enabled": true
+    },
+    {
+      "id": 187,
+      "code": "UE/06",
+      "name": "SANDEMA SHS",
+      "enabled": true
+    },
+    {
+      "id": 313,
+      "code": "UE/08",
+      "name": "GREAT VICTORY ACADEMY, BOLGATANGA",
+      "enabled": true
+    },
+    {
+      "id": 383,
+      "code": "UE/30",
+      "name": "UPPER EAST REGION",
+      "enabled": true
+    },
+    {
+      "id": 392,
+      "code": "UE/31",
+      "name": "BOLGATANGA",
+      "enabled": true
+    },
+    {
+      "id": 430,
+      "code": "UE/33",
+      "name": "ST. JOHN BOSCOS COLLEGE OF EDUCATION - NAVRONGO",
+      "enabled": true
+    },
+    {
+      "id": 63,
+      "code": "UW/01",
+      "name": "WA SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 64,
+      "code": "UW/02",
+      "name": "TUMU COLLEGE OF EDUCATION",
+      "enabled": true
+    },
+    {
+      "id": 65,
+      "code": "UW/03",
+      "name": "LAWRA SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 66,
+      "code": "UW/04",
+      "name": "NANDOM SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 202,
+      "code": "UW/05",
+      "name": "WA POLYTECHNIC",
+      "enabled": true
+    },
+    {
+      "id": 384,
+      "code": "UW/30",
+      "name": "UPPER WEST REGION",
+      "enabled": true
+    },
+    {
+      "id": 393,
+      "code": "UW/31",
+      "name": "WA",
+      "enabled": true
+    },
+    {
+      "id": 427,
+      "code": "UW/32",
+      "name": "MCCOY COLLEGE OF EDUCATION - NADOWLI",
+      "enabled": true
+    },
+    {
+      "id": 51,
+      "code": "VR/01",
+      "name": "HO POLYTECHNIC",
+      "enabled": true
+    },
+    {
+      "id": 53,
+      "code": "VR/02",
+      "name": "AKATSI COLLEGE OF EDUCATION",
+      "enabled": true
+    },
+    {
+      "id": 52,
+      "code": "VR/03",
+      "name": "JASIKAN COLLEGE OF EDUCATION",
+      "enabled": true
+    },
+    {
+      "id": 54,
+      "code": "VR/04",
+      "name": "MAWULI SCHOOL, HO",
+      "enabled": true
+    },
+    {
+      "id": 83,
+      "code": "VR/05",
+      "name": "ST. TERESA'S COLLEGE OF EDUCATION, HOHOE",
+      "enabled": true
+    },
+    {
+      "id": 111,
+      "code": "VR/06",
+      "name": "HO NURSING TRAINING COLLEGE",
+      "enabled": true
+    },
+    {
+      "id": 128,
+      "code": "VR/07",
+      "name": "MAFI KUMASE SHS",
+      "enabled": true
+    },
+    {
+      "id": 181,
+      "code": "VR/08",
+      "name": "SOKODE SENIOR TECHNICAL SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 182,
+      "code": "VR/09",
+      "name": "KETA BUSINESS COLLEGE",
+      "enabled": true
+    },
+    {
+      "id": 378,
+      "code": "VR/30",
+      "name": "VOLTA REGION",
+      "enabled": true
+    },
+    {
+      "id": 390,
+      "code": "VR/31",
+      "name": "HO",
+      "enabled": true
+    },
+    {
+      "id": 402,
+      "code": "VR/32",
+      "name": "SCHOOL OF HYGIENE, HO",
+      "enabled": true
+    },
+    {
+      "id": 431,
+      "code": "VR/33",
+      "name": "HO-KPODZI E. P A SCHOOL - HO",
+      "enabled": true
+    },
+    {
+      "id": 377,
+      "code": "WN/30",
+      "name": "WESTERN NORTH REGION",
+      "enabled": true
+    },
+    {
+      "id": 78,
+      "code": "WR/01",
+      "name": "BOMPEH SENIOR HIGH TECHNICAL SCHOOL, TAKORADI",
+      "enabled": true
+    },
+    {
+      "id": 41,
+      "code": "WR/02",
+      "name": "TAKORADI SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 42,
+      "code": "WR/03",
+      "name": "FIASEMAN SENIOR HIGH SCHOOL, TARKWA",
+      "enabled": true
+    },
+    {
+      "id": 43,
+      "code": "WR/04",
+      "name": "SEFWI WIAWSO COLLEGE OF EDUCATION",
+      "enabled": true
+    },
+    {
+      "id": 49,
+      "code": "WR/05",
+      "name": "BIA LAMPLIGHTER COLLEGE OF EDUCATION, SEFWI DEBISO",
+      "enabled": true
+    },
+    {
+      "id": 44,
+      "code": "WR/06",
+      "name": "HOLY CHILD COLLEGE OF EDUCATION, TAKORADI",
+      "enabled": true
+    },
+    {
+      "id": 47,
+      "code": "WR/07",
+      "name": "NSEIN SENIOR HIGH SCHOOL, NSEIN-AXIM",
+      "enabled": true
+    },
+    {
+      "id": 45,
+      "code": "WR/08",
+      "name": "ST. JOHNS SENIOR HIGH SCHOOL, TAKORADI",
+      "enabled": true
+    },
+    {
+      "id": 46,
+      "code": "WR/09",
+      "name": "BIBIANI SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 48,
+      "code": "WR/10",
+      "name": "ENCHI COLLEGE OF EDUCATION",
+      "enabled": true
+    },
+    {
+      "id": 50,
+      "code": "WR/11",
+      "name": "ST.FRANCIS OF ASSISI",
+      "enabled": true
+    },
+    {
+      "id": 40,
+      "code": "WR/12",
+      "name": "TAKORADI POLYTECHNIC",
+      "enabled": true
+    },
+    {
+      "id": 103,
+      "code": "WR/13",
+      "name": "JUABOSO SENIOR HIGH SCHOOL",
+      "enabled": true
+    },
+    {
+      "id": 108,
+      "code": "WR/14",
+      "name": "ADIEMBRA",
+      "enabled": true
+    },
+    {
+      "id": 183,
+      "code": "WR/15",
+      "name": "ASANKRAGWA SHS",
+      "enabled": true
+    },
+    {
+      "id": 184,
+      "code": "WR/16",
+      "name": "WASSA AKROPONG SHS",
+      "enabled": true
+    },
+    {
+      "id": 376,
+      "code": "WR/30",
+      "name": "WESTERN REGION",
+      "enabled": true
+    },
+    {
+      "id": 389,
+      "code": "WR/31",
+      "name": "TAKORADI",
+      "enabled": true
+    },
+    {
+      "id": 398,
+      "code": "WR/32",
+      "name": "SEFWI WIAWSO",
+      "enabled": true
+    },
+    {
+      "id": 401,
+      "code": "WR/33",
+      "name": "GOASO NURSING TRAINING COLLEGE",
+      "enabled": true
+    }
+  ]
+}

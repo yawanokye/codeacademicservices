@@ -1,0 +1,24 @@
+UCC Academic Submission Portals v23
+
+Field Experience and Teaching Practice update
+
+1. Public portal renamed to "Field Experience and Teaching Practice".
+2. One assessment category is submitted per submission:
+   - Field Experience I & II
+   - Field Experience III & IV
+   - Field Experience V
+   - Micro-Teaching
+   - Macro-Teaching
+   - Reflection
+3. The Field Experience public portal now validates the selected assessment against the correct Excel columns.
+4. The approved six-sheet Excel workbook is included as a built-in Field Experience and Teaching Practice resource.
+5. The old Project Work score-sheet sample is no longer shown as a Field Experience resource.
+6. Admin Field Experience records are grouped into the same six assessment categories.
+7. Admin review displays the extracted student rows using the correct score columns for the selected assessment.
+8. Consolidated Field/Teaching export contains a separate worksheet for each assessment category. Approved records only are included and rows are sorted by registration number.
+9. Master Field/Teaching export contains the same assessment-specific worksheets plus the Field/Teaching register.
+10. The Field/Teaching register now includes Assessment Type and uses assessment-specific score-row counts.
+11. Existing pre-v23 Field Experience records remain visible under Previous / Unclassified Field Experience and are preserved in legacy exports where applicable.
+12. Other portals and their workflows are unchanged.
+
+No new environment variables or npm dependencies are required.

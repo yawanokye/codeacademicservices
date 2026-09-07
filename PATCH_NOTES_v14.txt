@@ -1,0 +1,14 @@
+UCC Submission Portal v14 patch
+
+Main change: Undergraduate Project Work verification gate.
+
+- New and legacy project-work submissions default to Pending Verification unless explicitly reviewed.
+- Only Approved project-work submissions are included in consolidated and master score outputs.
+- Department project-work Administrators can Approve, Reject, Return for Correction, or reset to Pending.
+- Project-work rows are colour coded: amber Pending, green Approved, red Rejected, blue Returned.
+- Review detail shows supervisor/examiner identity, email, study centre, score rows, submitted files and audit metadata.
+- Automated warning flags cover repeat supervisors, repeat supervisor/study-centre combinations, registration numbers already found in other Approved score sheets, high row counts, and future secure-link expiry/revocation metadata.
+- Warning flags are advisory. Administrators may approve after review.
+- Project Work Register now includes review status, review timestamp, reviewer and note.
+- Public project-work confirmation states that the submission is Pending Verification.
+- Optional environment variable: PROJECT_HIGH_ROW_WARNING=100.

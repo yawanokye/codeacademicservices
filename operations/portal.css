@@ -1,0 +1,121 @@
+:root{font-family:Arial,sans-serif;color:#172431;background:#f4f7f9}*{box-sizing:border-box}body{margin:0}.topbar{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:16px 24px;background:#082b4c;color:#fff}.brand{display:flex;align-items:center;gap:12px}.brand img{width:48px;height:48px;object-fit:contain;background:#fff;border-radius:50%}.brand h1{margin:0;font-size:22px}.brand small{opacity:.85}.links{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.links a,.links button{color:#fff;background:transparent;border:1px solid rgba(255,255,255,.4);padding:8px 11px;border-radius:7px;text-decoration:none;cursor:pointer}main{padding:24px;max-width:1500px;margin:auto}.intro,.card{background:#fff;border:1px solid #dce3ea;border-radius:12px;padding:18px;margin-bottom:18px}.intro{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}.intro h2{margin:4px 0 8px}.eyebrow{text-transform:uppercase;letter-spacing:.08em;font-size:12px;color:#637487;font-weight:700}.actions{display:flex;gap:8px;flex-wrap:wrap}.btn{display:inline-block;border:1px solid #b7c2cc;background:#fff;color:#153047;padding:8px 11px;border-radius:7px;text-decoration:none;cursor:pointer;font-weight:700}.btn.primary{background:#0b5b88;color:#fff;border-color:#0b5b88}.btn.good{background:#137a45;color:#fff;border-color:#137a45}.btn.warn{background:#a55d00;color:#fff;border-color:#a55d00}.btn.danger{background:#9b2c2c;color:#fff;border-color:#9b2c2c}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:1250px}th,td{border-bottom:1px solid #e3e8ed;padding:9px 8px;text-align:left;vertical-align:top;font-size:13px}th{background:#eef3f7;position:sticky;top:0;z-index:1}.status{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:700;background:#eef2f6}.status.paid{background:#dff3e7;color:#0f6c3d}.status.queried{background:#fde8e8;color:#8f2626}.status.verified{background:#e2f0ff;color:#155b8b}.status.approved-for-payment{background:#fff2cc;color:#7a5a00}.check-ok{color:#0f6c3d;font-weight:800}.check-bad{color:#9b2c2c;font-weight:800}.empty{padding:28px;text-align:center;color:#67788a}.modal{border:0;border-radius:12px;width:min(1100px,94vw);height:min(820px,90vh);padding:0}.modal::backdrop{background:rgba(0,0,0,.5)}.modal-head{display:flex;justify-content:space-between;align-items:center;padding:12px 15px;border-bottom:1px solid #dce3ea}.modal iframe{width:100%;height:calc(90vh - 70px);border:0}.close{border:0;background:#eef2f5;border-radius:50%;width:34px;height:34px;font-size:20px;cursor:pointer}.toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.toolbar input{min-width:280px;padding:9px 11px;border:1px solid #c9d3dc;border-radius:7px}.note{max-width:260px;white-space:normal}.summary-chip{display:inline-block;padding:4px 8px;background:#eef3f7;border-radius:999px;font-size:12px;margin-right:4px}@media(max-width:800px){main{padding:14px}.topbar,.intro{flex-direction:column;align-items:stretch}.toolbar input{min-width:0;width:100%}}
+
+/* v29: developer preview banner */
+.developer-preview-banner{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:11px max(20px,calc((100vw - 1400px)/2));background:#f6efff;border-bottom:1px solid #d8c4ef;color:#432d61;font-size:13px}.developer-preview-banner>div:first-child{display:flex;flex-direction:column;gap:2px}.developer-preview-banner span{color:#604d78}.developer-preview-actions{display:flex;gap:8px;flex-wrap:wrap}.developer-preview-actions a,.developer-preview-actions button{border:1px solid #bca4d8;background:#fff;color:#432d61;border-radius:7px;padding:8px 11px;font:inherit;font-weight:800;text-decoration:none;cursor:pointer}@media(max-width:760px){.developer-preview-banner{align-items:stretch;flex-direction:column}}
+
+/* v30: fit Payroll and Auditor tables cleanly within desktop viewport */
+.operations-page main{
+  width:100%;
+  max-width:none;
+  padding:16px clamp(10px,1.25vw,22px);
+}
+.operations-page .intro,
+.operations-page .card{margin-bottom:14px}
+.operations-page .card{padding:12px}
+.operations-page .operations-table-wrap{
+  width:100%;
+  overflow-x:auto;
+  -webkit-overflow-scrolling:touch;
+  border-radius:8px;
+}
+.operations-page .operations-table{
+  width:100%;
+  min-width:0;
+  table-layout:fixed;
+}
+.operations-page .operations-table th,
+.operations-page .operations-table td{
+  padding:7px 6px;
+  font-size:12px;
+  line-height:1.25;
+  overflow-wrap:anywhere;
+  word-break:normal;
+}
+.operations-page .operations-table th{
+  font-size:11.5px;
+  white-space:normal;
+}
+.operations-page .operations-table small{font-size:11px;line-height:1.2}
+.operations-page .operations-table .btn{
+  padding:6px 8px;
+  font-size:11.5px;
+  line-height:1.15;
+  white-space:normal;
+}
+.operations-page .operations-table .status{
+  padding:4px 7px;
+  font-size:11px;
+  line-height:1.15;
+  white-space:normal;
+  text-align:center;
+}
+.operations-page .operations-table .note{max-width:none}
+
+/* Shared column proportions */
+.operations-page .operations-table col.c-sn{width:3%}
+.operations-page .operations-table col.c-reference{width:8%}
+.operations-page .operations-table col.c-supervisor{width:15%}
+.operations-page .operations-table col.c-centre{width:8%}
+.operations-page .operations-table col.c-approved{width:8%}
+.operations-page .operations-table col.c-count{width:5%}
+.operations-page .operations-table col.c-cross{width:5%}
+.operations-page .operations-table col.c-claim{width:5%}
+.operations-page .operations-table col.c-status{width:8%}
+.operations-page .operations-table col.c-note{width:7%}
+.operations-page .operations-table col.c-actions{width:18%}
+.operations-page .operations-table col.c-updated{width:13%}
+
+.payroll-page .payroll-row-actions{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:5px;
+  align-items:stretch;
+}
+.payroll-page .payroll-row-actions .btn{
+  width:100%;
+  min-width:0;
+  margin:0;
+}
+.payroll-page .payroll-row-actions .btn:last-child:nth-child(odd){
+  grid-column:1 / -1;
+}
+
+/* The auditor has no action column, so use the freed width for readable notes. */
+.auditor-page .auditor-table col.c-supervisor{width:16%}
+.auditor-page .auditor-table col.c-approved{width:9%}
+.auditor-page .auditor-table col.c-status{width:8%}
+.auditor-page .auditor-table col.c-note{width:10%}
+.auditor-page .auditor-table col.c-updated{width:13%}
+
+@media(max-width:1280px){
+  .operations-page .operations-table{min-width:1240px;table-layout:fixed}
+}
+@media(max-width:800px){
+  .operations-page main{padding:10px}
+  .operations-page .card{padding:8px}
+}
+
+/* v32: compact central Payroll and Auditor workspaces */
+.operations-page main{max-width:1780px;padding:12px clamp(9px,1vw,18px)}
+.operations-page .compact-intro{padding:13px 15px;align-items:center}
+.operations-page .compact-intro h2{font-size:21px;margin:2px 0 5px}
+.operations-page .compact-intro p{font-size:13px;line-height:1.4;max-width:900px}
+.operations-page .operations-card{padding:11px}
+.operations-filters{display:grid;grid-template-columns:1.15fr 1.3fr 1fr 1.35fr;gap:9px;margin-bottom:10px;padding:10px;border:1px solid #dce3ea;border-radius:9px;background:#f7f9fb}
+.operations-filters label{display:grid;gap:4px;color:#526575;font-size:11px;font-weight:800}
+.operations-filters select,.operations-filters input{width:100%;height:35px;margin:0;padding:6px 9px;border:1px solid #c9d3dc;border-radius:7px;background:#fff;color:#172431;font:inherit;font-size:12px}
+.result-count{margin:2px 2px 9px;font-size:13px}.result-count strong{color:#082b4c;font-size:17px}
+.operations-page .operations-table{width:100%;min-width:0;table-layout:fixed}
+.operations-page .operations-table th,.operations-page .operations-table td{padding:7px 7px;font-size:11.5px;line-height:1.26;overflow-wrap:break-word;word-break:normal}
+.operations-page .operations-table th{font-size:11px}
+.operations-page .operations-table td>small{display:block;margin-top:3px;color:#536575;font-size:10.5px;line-height:1.25}
+.claim-reference{display:block;color:#102d47;font-size:12px;line-height:1.2}
+.workflow-label{display:inline-block;margin:4px 0 1px;padding:2px 6px;border-radius:999px;background:#eaf2f8;color:#174c72;font-size:10px;font-weight:850}
+.quantity-stack,.check-stack{display:grid;gap:4px}.quantity-stack span{display:block}.quantity-stack b{font-size:12px;color:#102d47}
+.payroll-note{padding:5px 6px;border-radius:6px;background:#f5f7f9}.read-only{color:#687987;font-size:11px}
+.operations-page .compact-btn{padding:5px 7px;font-size:10.5px;white-space:nowrap}
+.operations-page .operations-table col.c-sn{width:3%}.operations-page .operations-table col.c-claim{width:18%}.operations-page .operations-table col.c-claimant{width:15%}.operations-page .operations-table col.c-approved{width:13%}.operations-page .operations-table col.c-quantities{width:12%}.operations-page .operations-table col.c-checks{width:13%}.operations-page .operations-table col.c-payroll{width:12%}.operations-page .operations-table col.c-actions{width:14%}.operations-page .operations-table col.c-updated{width:14%}
+.payroll-page .payroll-row-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}.payroll-page .payroll-row-actions .btn{min-width:0;padding:5px 4px;font-size:10px;line-height:1.15;overflow-wrap:normal;word-break:normal;white-space:normal}.payroll-page .payroll-row-actions .reset-action{grid-column:1/-1}
+.auditor-page .operations-table col.c-claim{width:19%}.auditor-page .operations-table col.c-claimant{width:15%}.auditor-page .operations-table col.c-approved{width:13%}.auditor-page .operations-table col.c-quantities{width:12%}.auditor-page .operations-table col.c-checks{width:12%}.auditor-page .operations-table col.c-payroll{width:12%}.auditor-page .operations-table col.c-updated{width:14%}
+@media(max-width:1280px){.operations-page .operations-table{min-width:980px}.operations-filters{grid-template-columns:1fr 1fr}}
+@media(max-width:700px){.operations-filters{grid-template-columns:1fr}.operations-page .compact-intro{align-items:stretch}.operations-page .operations-table{min-width:900px}}

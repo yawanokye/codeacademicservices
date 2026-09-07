@@ -1,0 +1,25 @@
+UCC CoDE Academic Submission Portal v32
+
+Central operations access
+
+- Removed Payroll and Auditor links from the Department chooser and Department Administration header.
+- Added a dedicated Payroll & Auditor tab in the Developer Portal.
+- Developer operations access opens a shared session that can switch among all four departments.
+
+Payroll and Auditor selection
+
+- Added Department, Activity and Payroll Status selectors.
+- Activity choices include Undergraduate Project Work, all six Field Experience and Teaching Practice options, Dissertation Assessment and Dissertation Vetting.
+- Dissertation Assessment and Vetting claims require department approval before Payroll can see them.
+- Auditor visibility remains restricted to claims marked Approved for Payment or Paid by Payroll.
+
+Compact page layout
+
+- Replaced the fourteen-column Payroll and Auditor tables with eight grouped columns.
+- Grouped claimant, activity, quantities, reconciliation, claim preview, payment status and actions into readable compact cells.
+- Prevented action buttons from collapsing into narrow vertical text.
+
+Field Experience default
+
+- Department of Education Programmes is now selected by default on the Field Experience and Teaching Practice public submission form.
+- Submitters can still change the department when required.

@@ -1,0 +1,33 @@
+UCC Academic Submission Portal v25
+=================================
+
+1. Study Centre column in approved score exports
+- Undergraduate Project Work consolidated and master score sheets now include STUDY CENTRE.
+- Field Experience and Teaching Practice consolidated/master score sheets, including the individual Field Experience I, II, III, IV, V, Micro-Teaching, Macro-Teaching and Reflection reports, now include STUDY CENTRE.
+- The centre name is resolved from the centre code embedded in the Registration Number. Example: BCF/CR/01/22/0002 -> centre code CR/01 -> UNIVERSITY OF CAPE COAST.
+- The initial centre-code directory contains the 93 centre records supplied in code_centres2 (1).xlsx.
+- Unknown codes remain visible as UNKNOWN STUDY CENTRE (CODE) rather than being dropped.
+
+2. Centre by Centre Scores replaces Programme by Centre
+- Programme by Centre ZIP has been renamed Centre by Centre Scores ZIP.
+- Grouping is now by centre code only, not programme + centre.
+- All approved students at the same centre, across programmes, are placed in one XLSX file.
+- Every centre file is sorted by Registration/Index Number before S/N is assigned.
+- Each XLSX file is named using the official Study Centre name from the centre-code directory.
+- Applies to Distance Project Work, Non-Residential Project Work, and each individual Field Experience/Teaching Practice report.
+- Old programme-centre API URLs remain as compatibility aliases but now return the new Centre by Centre output.
+
+3. Developer-managed Study Centre Code Directory
+- Developer Portal now contains a Study Centre Code Directory section.
+- The current mapping can be viewed and downloaded as Excel.
+- Developer can replace the directory by uploading XLSX, XLS or CSV.
+- Required columns: CODE and CENTER_NAME/CENTRE_NAME. ID is optional.
+- Files matching the supplied CoDE format (S/N | ID | CODE | CENTER _ NAME) are accepted directly.
+- The directory is stored on the persistent data volume so later updates survive redeployment.
+
+4. Existing department-specific public centre lists remain separate
+- The earlier Publish Study Centres by Department function remains unchanged.
+- That list controls which centre checkboxes submitters can select.
+- The new centre-code directory controls how Registration Numbers are converted to official centre names in score reports.
+
+No new environment variables or npm packages are required.

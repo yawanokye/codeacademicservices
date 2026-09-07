@@ -1,0 +1,11 @@
+UCC CoDE Academic Submission Portal v30
+
+Payroll and Auditor portal layout refinement
+
+- Payroll and Auditor pages now use the full browser width instead of a 1500px maximum content width.
+- Desktop tables use fixed responsive column proportions so all primary columns fit within the page.
+- Table text, status badges and controls are slightly more compact without removing information.
+- Payroll action buttons are arranged in a compact two-column grid inside the Actions cell.
+- Long references, emails, centre names, notes and status labels wrap safely instead of forcing the table wider.
+- On narrower screens, the tables retain horizontal scrolling rather than crushing columns.
+- Claim-form preview behaviour and all payroll/auditor permissions and actions are unchanged.

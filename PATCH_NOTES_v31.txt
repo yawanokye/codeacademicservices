@@ -1,0 +1,32 @@
+UCC CoDE Academic Submission Portal v31
+
+Department-specific resources
+
+- Built-in Project Work and Field Experience downloads require a selected department.
+- Word and Excel headings carry the selected department's official name.
+- Added the supplied Field Experience and Reflection allocation/claim form as a built-in resource for all departments.
+
+Field Experience and Teaching Practice controls
+
+- Number of Students / Candidates must match extracted score rows at submission.
+- Department administrators can include or exclude individual score rows before approval.
+- Duplicate approved registrations are identified within the same assessment category.
+- Duplicate Reconciliation shows both extracted score sheets, allows registration correction, records correction history and re-approves the affected sheets.
+- Approved Field Experience and Teaching Practice register added.
+- Consolidated, category, master, centre and payment outputs use included approved rows only.
+
+Payroll and Auditor workflow
+
+- Payroll shows only department-approved Project Work and Field Experience claims.
+- Approved for Payment requires a claim form and a successful quantity-to-score reconciliation.
+- Paid can be recorded only after Approved for Payment.
+- Auditor records appear only after Payroll approval for payment. Paid claims remain visible.
+- Department review or duplicate reconciliation resets an already processed Payroll record to Pending.
+
+Centres and codes
+
+- Bundled centre-code directory updated from code_centres2. (1)(2).xlsx with 197 unique code records.
+- Approved centre names are published to all four departments on a fresh install or v31 centre-catalogue migration.
+- Add Centre now saves ID, code, official name and department assignments together.
+- Developer Portal Enable / Disable temporarily hides or restores a centre without deleting its record, code or department assignments.
+- Directory imports can publish imported centres to selected departments.

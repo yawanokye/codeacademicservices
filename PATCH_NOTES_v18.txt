@@ -1,0 +1,14 @@
+UCC Submission Portal v18 patch
+
+Purpose:
+- Exclude Project Work template footer metadata from all score row counts and exports.
+- Specifically exclude Signature of Supervisor, Date and Contact lines beneath the score table.
+- Preserve header-only validation and continue ignoring empty/pre-filled template rows.
+- Clean older stored submissions at export/count time without requiring resubmission.
+
+Replace these files on a v17 deployment:
+- server.js
+- package.json
+- README.md
+
+No new Render environment variables or npm dependencies are required.

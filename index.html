@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Project Work and Dissertation Submission Portal" />
+  <title>Project Work & Dissertation Submission Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-wrap">
+      <div class="brand-mark"><img src="ucc-logo.png" alt="University of Cape Coast logo" /></div>
+      <div>
+        <p class="eyebrow">College Submission Portal</p>
+        <h1>Project Work & Dissertation Submission</h1>
+      </div>
+    </div>
+    <span class="secure-badge">Validated submission</span>
+  </header>
+
+  <main class="page-shell">
+    <section class="hero card">
+      <div>
+        <span class="pill">2025/2026 Academic Year</span>
+        <h2>Submit project work, dissertation documents, claim forms and scores</h2>
+        <p>
+          Complete the form below. Your score spreadsheet is checked in your browser before submission.
+          No score file can be submitted until the five required column headings are found. The number of students and all other spreadsheet content are ignored.
+        </p>
+      </div>
+      <div class="hero-note">
+        <strong>Required score columns</strong>
+        <span>S/N</span>
+        <span>NAME</span>
+        <span>REGISTRATION NO.</span>
+        <span>GROUP NO.</span>
+        <span>TOTAL SCORE</span>
+      </div>
+    </section>
+
+    <form id="submissionForm" class="form-card card" novalidate>
+      <div class="section-heading">
+        <div class="step-number">1</div>
+        <div>
+          <h3>Supervisor / Examiner details</h3>
+          <p>Tell us who is making the submission.</p>
+        </div>
+      </div>
+
+      <div class="grid two-col">
+        <label class="field">
+          <span>Full name <b>*</b></span>
+          <input type="text" id="fullName" name="fullName" autocomplete="name" required placeholder="Enter full name" />
+        </label>
+        <label class="field">
+          <span>Phone number <b>*</b></span>
+          <input type="tel" id="phone" name="phone" required placeholder="e.g. 0240000000" pattern="[0-9+ ]{9,16}" />
+        </label>
+        <label class="field">
+          <span>Email <b>*</b></span>
+          <input type="email" id="email" name="email" autocomplete="email" required placeholder="name@example.com" />
+        </label>
+        <label class="field">
+          <span>Number of groups / candidates <b>*</b></span>
+          <input type="number" id="groupCount" name="groupCount" required min="1" step="1" placeholder="1" />
+        </label>
+      </div>
+
+      <div class="section-heading spaced">
+        <div class="step-number">2</div>
+        <div>
+          <h3>Submission details</h3>
+          <p>Select the work type and study centre.</p>
+        </div>
+      </div>
+
+      <div class="grid two-col">
+        <label class="field">
+          <span>Submission type <b>*</b></span>
+          <select id="submissionType" name="submissionType" required>
+            <option value="">Select type</option>
+            <option>Project Work</option>
+            <option>Dissertation</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Study centre <b>*</b></span>
+          <select id="studyCentre" name="studyCentre" required>
+            <option value="">Select study centre</option>
+            <option>Bompeh</option>
+            <option>GHANASS</option>
+            <option>Lashibi</option>
+            <option>Sokode</option>
+            <option>Riverview Kasoa</option>
+            <option>Odorgonno</option>
+            <option>KTI</option>
+            <option>Tamale</option>
+            <option>Zenith</option>
+            <option>STU Sunyani</option>
+            <option>Fafraha</option>
+            <option>Lutheran Madina</option>
+            <option>Fiaseman</option>
+            <option>UCC</option>
+            <option>Enchi</option>
+            <option>Bolga</option>
+            <option>Wa</option>
+            <option>Chemu</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="section-heading spaced">
+        <div class="step-number">3</div>
+        <div>
+          <h3>Documents</h3>
+          <p>Upload the required supporting files.</p>
+        </div>
+      </div>
+
+      <div class="grid two-col">
+        <label class="upload-box" id="claimBox">
+          <input type="file" id="claimForm" name="claimForm" accept=".pdf,.doc,.docx" required />
+          <span class="upload-icon">↥</span>
+          <strong>Claim form <b>*</b></strong>
+          <small>PDF or Word, maximum 10 MB</small>
+          <span class="file-name" id="claimName">No file selected</span>
+        </label>
+
+        <label class="upload-box" id="reportBox">
+          <input type="file" id="reportFile" name="reportFile" accept=".pdf,.doc,.docx" required />
+          <span class="upload-icon">↥</span>
+          <strong>Brief report <b>*</b></strong>
+          <small>Observations, challenges and recommendations</small>
+          <span class="file-name" id="reportName">No file selected</span>
+        </label>
+      </div>
+
+      <label class="upload-box wide spaced-small" id="workBox">
+        <input type="file" id="completedWork" name="completedWork" accept=".pdf,.doc,.docx,.zip" multiple required />
+        <span class="upload-icon">↥</span>
+        <strong>Completed project work / dissertation <b>*</b></strong>
+        <small>Upload one or more PDF/Word files, or a ZIP archive. Maximum 50 MB per file.</small>
+        <span class="file-name" id="workName">No file selected</span>
+      </label>
+
+      <div class="section-heading spaced">
+        <div class="step-number">4</div>
+        <div>
+          <h3>Scores spreadsheet</h3>
+          <p>Only the five required column headings are validated before submission.</p>
+        </div>
+      </div>
+
+      <div class="score-panel">
+        <label class="upload-box wide" id="scoresBox">
+          <input type="file" id="scoresFile" name="scoresFile" accept=".xlsx,.xls,.csv" required />
+          <span class="upload-icon">↥</span>
+          <strong>Upload scores spreadsheet <b>*</b></strong>
+          <small>XLSX, XLS or CSV. The validator finds the required header row automatically. Rows above or below it are ignored.</small>
+          <span class="file-name" id="scoresName">No file selected</span>
+        </label>
+
+        <div id="validationPanel" class="validation-panel hidden" aria-live="polite">
+          <div class="validation-header">
+            <div>
+              <span class="status-dot" id="statusDot"></span>
+              <strong id="validationTitle">Validation pending</strong>
+            </div>
+            <button type="button" class="text-btn" id="clearScores">Remove file</button>
+          </div>
+          <p id="validationSummary"></p>
+          <ul id="validationErrors" class="validation-errors"></ul>
+          <div class="preview-wrap hidden" id="previewWrap">
+            <div class="preview-title">Preview of valid rows</div>
+            <div class="table-scroll">
+              <table id="previewTable"></table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-heading spaced">
+        <div class="step-number">5</div>
+        <div>
+          <h3>Declaration and submit</h3>
+          <p>Confirm the submission is complete and accurate.</p>
+        </div>
+      </div>
+
+      <label class="check-row">
+        <input type="checkbox" id="declaration" required />
+        <span>I confirm that the uploaded files and scores are complete and accurate.</span>
+      </label>
+
+      <div id="formMessage" class="form-message hidden"></div>
+
+      <div class="actions">
+        <button type="button" class="secondary-btn" id="resetBtn">Reset</button>
+        <button type="submit" class="primary-btn" id="submitBtn" disabled>Submit records</button>
+      </div>
+    </form>
+
+    <footer>
+      <p>For official academic submissions only. Validation happens locally in your browser before upload.</p>
+    </footer>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

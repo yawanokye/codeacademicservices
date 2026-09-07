@@ -1,0 +1,18 @@
+v19 patch from v18
+
+Changes:
+- Undergraduate Project Work detail view now shows extracted score entries inline below Submitted files.
+- Each student score row has an Include checkbox. All valid rows are checked by default.
+- Admin may uncheck specific rows before approval; those rows are excluded from Consolidated and Master Project Scores without changing the original uploaded workbook.
+- Checkbox exclusions are persisted with the submission and remain effective on later exports.
+- Project registers now show both SCORE ROWS EXTRACTED and ROWS INCLUDED FOR CONSOLIDATION.
+- Signature of Supervisor, Date, Contact and blank/template rows remain excluded automatically.
+- Fresh and Revised Dissertation registers retain Supervisor's Name as a dedicated column and remain deduplicated by index number.
+
+Files changed from v18:
+- server.js
+- package.json
+- README.md
+- admin/admin.js
+- admin/admin.css
+- PATCH_NOTES_v19.txt

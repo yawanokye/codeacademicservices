@@ -1,0 +1,17 @@
+UCC Submission Portal v17 patch
+
+Purpose:
+- Add Non-Residential to Undergraduate Project Work as a fixed regular-student option.
+- Keep Non-Residential project records and consolidated scores separate from Distance project records.
+
+Replace these files on a v16 deployment:
+- server.js
+- package.json
+- README.md
+- admin/index.html
+- admin/admin.js
+- admin/admin.css
+- public/project-work.html
+- public/common.js
+
+No new Render environment variables are required.

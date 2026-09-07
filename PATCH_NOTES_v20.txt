@@ -1,0 +1,19 @@
+v20 PATCH NOTES
+
+Base: v19
+
+Changed files:
+- server.js
+- admin/admin.js
+- package.json
+- README.md
+- PATCH_NOTES_v20.txt
+
+New behaviour:
+1. Return for Correction requires a non-empty reason.
+2. The reason is emailed to the Project Work or Field Experience supervisor/examiner via Gmail API.
+3. The email includes submission reference, study centre, correction reason and a link back to the appropriate public submission portal.
+4. Returned submissions show Sent/Failed/Pending correction-email status.
+5. Existing returned submissions can use Resend Correction Email without resetting their review status.
+6. Email failure does not reverse the Returned for Correction status.
+7. Resend Correction Email prompts for the recipient address, allowing correction of a mistyped submission email while preserving the original record.

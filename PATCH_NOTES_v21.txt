@@ -1,0 +1,9 @@
+UCC CoDE Academic Submission Portal v21
+
+1. Undergraduate Project Work public portal now supports one or more Distance study centres per submission. Non-Residential must be selected alone.
+2. Study centres are now published by department from the Developer Portal. Legacy/current centres migrate logically to Department of Business Programmes.
+3. Selected Project Work Claim Forms can be downloaded as a ZIP or emailed as one ZIP. Each claim form is renamed to the Supervisor/Examiner name.
+4. Distance and Non-Residential Project Work now have Programme by Centre ZIP exports. Grouping uses the first three Registration No. components, e.g. BCF/CR/01/22/0002 -> BCF/CR/01.
+5. Consolidated and master score sheets are sorted by Registration No.; Programme-by-Centre sheets are also sorted and renumbered.
+6. Existing single-centre submissions and existing Business study-centre JSON files remain backward compatible.
+7. No new npm dependency or Render environment variable is required.

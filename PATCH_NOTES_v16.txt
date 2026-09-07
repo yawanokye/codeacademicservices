@@ -1,0 +1,40 @@
+UCC Departmental Submission Portals v16
+========================================
+
+Base: v15
+
+Key changes
+-----------
+1. Revised/final dissertation titles may differ from earlier stages. Validation is against the current uploaded dissertation; lineage and previous title are retained.
+2. Student feedback is anonymised. Original assessor/vetter files are not forwarded. Admin uploads an anonymised report copy and optional anonymised reviewed dissertation. Text-based reviewer identity checks are applied.
+3. Revised dissertation administration uses Vetter(s), maximum 2. 0 = red; 1 or 2 = green.
+4. Revised section has Email Selected to Vetter. Fresh section retains Email Selected to Assessor.
+5. Public dissertation form supports Final Dissertation with required final dissertation, reviewer response(s), and Turnitin report.
+6. Admin dissertation tab has separate Fresh, Revised and Final submission sections.
+7. Secure Assessment/Vetting work submission requires Report + Claim Form + Score Sheet; reviewed dissertation remains optional.
+8. Fresh and Revised Dissertation Registers are separate and de-duplicated by index number within each stage, retaining the latest stage submission per student.
+9. Admin can Return to Student Without Processing from any dissertation stage with standard/custom reason and student email notification. Returned works are removed from active assignment processing.
+10. Public portals include Admin Login. Department admin uses form login/session plus Logout. Basic auth remains as a fallback.
+
+Files changed from v15
+----------------------
+server.js
+package.json
+README.md
+admin/index.html
+admin/admin.js
+admin/admin.css
+public/index.html
+public/project-work.html
+public/field-experience.html
+public/dissertation.html
+public/assessor.html
+public/styles.css
+public/admin-login.html   (new)
+PATCH_NOTES_v16.txt       (new)
+
+Deployment
+----------
+Build: npm install
+Start: npm start
+No new environment variables are required.

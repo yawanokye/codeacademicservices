@@ -1,0 +1,18 @@
+UCC Academic Submission Portals v29
+
+Developer passwordless portal preview
+- Added a Portal Preview tab to the Developer/System Administrator portal.
+- Developer can open Department Administration, Payroll or Auditor portals without entering the target user's password.
+- Standard preview identities: Department Administrator, Department Officer, Department Viewer, Payroll Officer and Auditor.
+- Developer can also preview an existing active administrator account with its exact role, department and section permissions.
+- Added Preview shortcut to active administrator records.
+- Preview session lasts 30 minutes and uses the existing secure HTTP-only administrator session cookie.
+- Protected portals display a Developer Preview Mode banner with the preview identity and expiry time.
+- Preview banner includes Return to Developer Portal and Exit Preview.
+- Actions carried out during developer preview are explicitly attributed as Developer Preview actions in review/payroll audit fields.
+- Added direct public-portal links in the preview tab for Project Work, Field Experience and Teaching Practice, Dissertation and Assessment Report submission portals.
+
+Deployment
+- No new Render environment variables.
+- No new npm dependencies.
+- Patch from v28 replaces: server.js, package.json, README.md, developer/index.html, developer/developer.js, developer/developer.css, admin/admin.js, admin/admin.css, operations/payroll.js, operations/auditor.js, operations/portal.css and adds PATCH_NOTES_v29.txt.

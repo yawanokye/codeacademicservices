@@ -1,0 +1,26 @@
+# v27 update: configurable claim forms, tabbed administration and incremental centre management
+
+## Field Experience and Teaching Practice
+- Added a Claim Form upload to the public Field Experience and Teaching Practice portal.
+- The Claim Form defaults to **Optional** for a new v27 installation/update.
+- Developer/System Administrator can classify the Field Experience Claim Form as **Optional** or **Compulsory** under **Portal Settings**.
+- The server enforces the setting, so a compulsory Claim Form cannot be bypassed by the browser.
+- Submitted Field Experience Claim Forms appear in the departmental submission-detail view.
+- This requirement setting applies only to Field Experience and Teaching Practice. Other portals are unchanged.
+
+## Cleaner administration tabs
+- Department administration now has four top-level tabs: Undergraduate Project Work, Field Experience & Teaching Practice, Dissertation Submission, and Assessment/Vetting Reports.
+- Project Work has separate Distance and Non-Residential sub-tabs.
+- Field Experience has one tab per approved score-sheet category, showing one category at a time.
+- Dissertation administration has Fresh, Revised, Final and Assignments sub-tabs.
+- Assessment/Vetting has separate Assessment and Vetting sub-tabs.
+- The Developer/System Administrator portal is also divided into Resources, Administrators, Study Centres and Portal Settings tabs.
+
+## Incremental study-centre management
+- Developer/System Administrator can add one public study centre to one or more departments without replacing existing lists.
+- Every published centre has an individual Delete control within its department.
+- The existing CSV replacement workflow remains available for intentional bulk replacement.
+- The Study Centre Code Directory also supports adding/updating one centre code at a time and deleting individual centre-code records.
+- Existing Excel/CSV directory replacement and restore functions remain available.
+
+No new npm package or Render environment variable is required.

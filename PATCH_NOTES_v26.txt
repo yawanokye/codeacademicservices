@@ -1,0 +1,20 @@
+UCC Academic Submission Portal v26
+=================================
+
+1. Consolidated score sheets sorted by Study Centre
+- Undergraduate Project Work consolidated score rows are now grouped alphabetically by the resolved STUDY CENTRE name.
+- Within each Study Centre, students are sorted by Registration/Index Number, then by student name where required.
+- The same centre-first ordering applies to Field Experience and Teaching Practice consolidated outputs, including the separate Field Experience I, II, III, IV, V, Micro-Teaching, Macro-Teaching and Reflection reports.
+- Legacy Field Experience consolidated records follow the same ordering.
+- Centre by Centre ZIP workbooks remain sorted by Registration/Index Number inside each individual centre file.
+
+2. Public study-centre choices sorted alphabetically
+- Undergraduate Project Work Study Centre checkboxes are displayed alphabetically.
+- Field Experience and Teaching Practice Study Centre checkboxes are displayed alphabetically.
+- Non-Residential is included in its correct alphabetical position on the Undergraduate Project Work portal.
+- The public study-centre API now returns each department's published list alphabetically, regardless of the order in which it was uploaded in the Developer/System Admin portal.
+- Shared study-centre dropdown loading also applies alphabetical ordering for consistency.
+
+3. Existing administration preserved
+- Developer/System Admin can continue to update department-specific public study-centre lists and the Study Centre Code Directory.
+- No new Render environment variables or npm packages are required.

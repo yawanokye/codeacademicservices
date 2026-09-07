@@ -1,0 +1,44 @@
+UCC Academic Submission Portal v28
+=================================
+
+BASE: v27
+
+1. Duplicate registration/index reconciliation
+   - Compare both duplicate approved/pending Project Work score sheets with supervisor/examiner details.
+   - View complete extracted score rows for each participating sheet.
+   - Edit the affected Registration/Index No. values.
+   - Save corrections and re-approve all participating score sheets.
+   - Consolidated reports immediately use corrected canonical values.
+   - Original uploaded workbook is preserved and corrections are audit-trailed.
+
+2. Claim form verification
+   - Project Work and Field Experience claim forms can open inside the admin review dialog.
+   - Supports inline PDF/image viewing, DOC/DOCX rendering and spreadsheet/CSV table preview.
+
+3. Total Number of Groups Submitting validation
+   - Accepts 8, eight, eight(8), eight (8), etc.
+   - Must match the number of distinct GROUP NO. values in the Project Work score sheet.
+   - Must also match the number of completed Project Work files attached.
+   - Mismatch blocks new submission and is highlighted for existing records.
+
+4. Project Work workbook rule
+   - Exactly one Excel worksheet is allowed for Undergraduate Project Work score sheets.
+
+5. Approved Register
+   - Added approved-only registers for Distance and Non-Residential Undergraduate Project Work.
+
+6. Payroll Portal
+   - Approved Project Work claims only.
+   - Cross-check claim form, claimed groups, score-sheet groups and completed works.
+   - Processing statuses: Pending, Verified, Approved for Payment, Paid, Queried/Hold.
+   - Payroll register export and Approved Register export.
+
+7. Auditor Portal
+   - Read-only approved-claim verification.
+   - Claim form preview, group reconciliation, payroll status and register exports.
+
+8. Department-scoped resources
+   - Developer selects both Departments and public portal(s) when publishing a resource.
+   - Applies to Undergraduate Project Work, Field Experience and Teaching Practice, Dissertation Submission and Assessment Report Submission.
+
+No new Render environment variables or npm packages are required.

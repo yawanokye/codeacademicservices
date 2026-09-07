@@ -1,0 +1,39 @@
+UCC Submission Portal v15
+
+This release includes the v14 score-verification gate plus a new Field Experience score submission workflow.
+
+UNDERGRADUATE PROJECT WORK VERIFICATION
+- Public submissions remain open.
+- Every new and legacy project-work submission defaults to Pending Verification unless explicitly reviewed.
+- Department administrators can Approve for Consolidation, Reject, Return for Correction, or reset a record to Pending.
+- Only Approved submissions feed Consolidated Project Scores and Master Project Scores.
+- Colour states: amber Pending, green Approved, red Rejected, blue Returned for Correction.
+- Review details show submitter identity, email, study centre, extracted score-row count, uploaded files, date/time and review audit information.
+- Advisory warnings flag repeat supervisors, repeat supervisor/study-centre combinations, registration numbers already found in other Approved score sheets, unusually high row counts, and future secure-link expiry/revocation metadata.
+
+FIELD EXPERIENCE SCORES
+- New public portal: /field-experience.html.
+- Collects department, supervisor/examiner title + first name + surname, phone, email, number of students/candidates, study centre and an Excel score sheet.
+- Uses the same header-only Excel validation as Project Work: S/N | NAME | REGISTRATION NO. | GROUP NO. | TOTAL SCORE.
+- Submission starts as Pending Verification.
+- Department administration receives Field Experience submissions in a separate subsection under the first admin tab.
+- Department administrators can Approve, Reject, Return for Correction or reset to Pending.
+- Only Approved Field Experience submissions feed Consolidated Field Experience Scores and Master Field Experience Scores.
+- Separate Field Experience Register is downloadable.
+- Empty data rows are excluded from all score consolidation.
+- Project Work scores and Field Experience scores are never mixed.
+
+ADMIN ACCESS / DEVELOPER
+- Field Experience is a separate permission section for individual administrators.
+- Developer can assign Field Experience access when creating invited administrator accounts.
+- Developer resources can be published to the Field Experience portal.
+- The existing built-in score-sheet sample is also available in Field Experience Resources because it uses the same five required headings.
+
+ADMIN PORTAL LAYOUT
+- Keeps three top-level admin tabs.
+- The first tab is labelled Project Work / Field Experience and contains two separate score-submission subsections.
+- Dissertation and Assessment/Vetting tabs remain separate and unchanged.
+
+OPTIONAL ENVIRONMENT VARIABLE
+PROJECT_HIGH_ROW_WARNING=100
+The threshold is advisory and applies to Project Work and Field Experience score-review warnings.

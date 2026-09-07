@@ -1,0 +1,21 @@
+UCC CoDE Academic Submission Portal v22
+
+CHANGE
+Undergraduate Project Work Study Centre(s) is now a checkbox list.
+
+BEHAVIOUR
+- Supervisor/Examiner can tick one or more Distance study centres.
+- No Ctrl/Cmd key is required.
+- A live counter shows the number of centres selected.
+- Non-Residential must remain a standalone selection. Selecting Non-Residential clears other centres; selecting a Distance centre clears Non-Residential.
+- The list is still loaded according to the department selected on the public portal.
+- The server continues to receive multiple studyCentre values and stores them using the v21 multi-centre format.
+
+FILES CHANGED FROM v21
+- public/project-work.html
+- public/styles.css
+- package.json
+- README.md
+- PATCH_NOTES_v22.txt
+
+No new dependencies or Render environment variables are required.

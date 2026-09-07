@@ -1,0 +1,55 @@
+services:
+  - type: web
+    name: codeacademicservices
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 24.14.1
+      - key: STORAGE_DIR
+        value: /var/data/codeacademicservices
+      - key: GMAIL_CLIENT_ID
+        sync: false
+      - key: GMAIL_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REFRESH_TOKEN
+        sync: false
+      - key: GMAIL_SENDER_EMAIL
+        sync: false
+      - key: GMAIL_FROM_NAME
+        value: CoDE Academic Services Portal
+      - key: ASSIGNMENT_EXPIRY_DAYS
+        value: 14
+      - key: STUDENT_FEEDBACK_EXPIRY_DAYS
+        value: 30
+      - key: ADMIN_INVITATION_EXPIRY_HOURS
+        value: 24
+      - key: PROJECT_HIGH_ROW_WARNING
+        value: 100
+      - key: SUPPORT_FORWARD_EXPIRY_DAYS
+        value: 14
+      - key: DEVELOPER_ADMIN_USER
+        value: developer
+      - key: DEVELOPER_ADMIN_PASSWORD
+        sync: false
+      - key: EDUCATION_ADMIN_USER
+        value: education-admin
+      - key: EDUCATION_ADMIN_PASSWORD
+        sync: false
+      - key: BUSINESS_ADMIN_USER
+        value: business-admin
+      - key: BUSINESS_ADMIN_PASSWORD
+        sync: false
+      - key: ARTS_SOCIAL_ADMIN_USER
+        value: arts-admin
+      - key: ARTS_SOCIAL_ADMIN_PASSWORD
+        sync: false
+      - key: SCIENCE_MATH_ADMIN_USER
+        value: science-admin
+      - key: SCIENCE_MATH_ADMIN_PASSWORD
+        sync: false
+    disk:
+      name: submission-data
+      mountPath: /var/data/codeacademicservices
+      sizeGB: 5

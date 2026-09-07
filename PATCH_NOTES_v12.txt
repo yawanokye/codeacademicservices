@@ -1,0 +1,23 @@
+# v12 - Single Secure Assignment Workspace
+
+This version implements one secure link per assessor/vetter assignment.
+
+## Assignment workflow
+- One email and one secure assignment workspace link, whether 1 or many works are assigned.
+- The workspace lists every assigned student with locked identity, index number, programme and dissertation title.
+- Download all assigned works as one ZIP or download each dissertation individually.
+- Revised/vetting assignments include reviewer-response documents in the work package and master ZIP.
+- Each assigned work has its own Assessment/Vetting Report, Claim Form and optional Reviewed Dissertation uploads.
+- Reports can be submitted one work at a time. The assessor can return later using the same link.
+- Progress is shown as X of Y submitted with Pending/Submitted status per work.
+- Early Bird is calculated per individual work based on its submission date.
+- A submitted work cannot be submitted again from the same assignment unless the department deletes that report submission.
+- The workspace remains available through the 8-week report deadline. The dissertation download window can expire earlier.
+
+## Admin portal
+- Assessor Dissertation Assignments now show submitted/assigned progress, pending count and Early Bird count.
+- Assignment status includes In progress, Completed and Download expired.
+- Assignment-linked Assessment/Vetting rows show their work number and Early Bird status.
+
+## Public assessor portal
+The public assessor form remains available for manual/exceptional submissions. Assignment email links redirect to the secure assignment workspace instead.
