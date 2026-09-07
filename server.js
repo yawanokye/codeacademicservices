@@ -192,6 +192,23 @@ const RESOURCE_PORTALS = new Set(['project-work','field-experience','dissertatio
 const ADMIN_SECTIONS = new Set(['project-work','field-experience','dissertation','assessor','payroll','auditor']);
 const ADMIN_ROLES = new Set(['viewer','officer','administrator']);
 const ROLE_RANK = { viewer:1, officer:2, administrator:3 };
+const STAFF_UNITS = Object.freeze({
+  'student-support': { label: 'Student Support Services Unit', summary: 'Triage complaints and service requests, communicate with students, and forward matters with comments.' },
+  'student-records': { label: 'Student Records Management Unit', summary: 'Receive and process assigned records matters. Official records remain controlled through approved UCC systems.' },
+  'college-registrar': { label: 'College Registrar', summary: 'Handle registrar matters, certificates, name changes and escalated service requests.' },
+  'provost': { label: 'Provost', summary: 'Read-only oversight of service performance, sensitive escalation and institutional trends.' },
+  'directorate-education-business': { label: 'Directorate of Education and Business Studies', summary: 'Academic oversight for Education and Business programmes.' },
+  'directorate-arts-stem': { label: 'Directorate of Arts and STEM Studies', summary: 'Academic oversight for Arts, Social Sciences, STEM and ICT programmes.' },
+  'examinations': { label: 'Examinations Unit', summary: 'Process examination-related matters and support controlled results workflows.' },
+  'payroll': { label: 'Payroll Portal', summary: 'Process only department-approved claims for payment.' },
+  'auditor': { label: "Auditor's Portal", summary: 'Read-only verification of payroll-approved or paid claims.' },
+  'regional-administrator': { label: 'Regional Administrators', summary: 'Facilitate, verify and escalate centre matters without approving academic records.' },
+  'coordinator': { label: 'Centre Coordinators', summary: 'Submit, verify, monitor and escalate centre matters without altering official records.' },
+  'quality-assurance': { label: 'Quality Assurance Unit', summary: 'Read-only quality oversight and monitoring.' },
+  'college-finance': { label: 'College Finance Officer', summary: 'Receive finance-related service matters and approved payment workflows.' },
+  'admissions': { label: 'Admissions Unit', summary: 'Receive assigned admissions and applicant service matters.' },
+  'stores': { label: 'Stores Unit', summary: 'Receive assigned stores and logistics service matters.' }
+});
 
 const BUILTIN_RESOURCES = [
   {
@@ -399,6 +416,14 @@ function sessionIdentity(req, department) {
   return s.identity;
 }
 function clearAdminSession(req) { const token=parseCookies(req).ucc_admin_session; if(token) ADMIN_SESSIONS.delete(token); }
+function staffSessionIdentity(req) {
+  const token=parseCookies(req).ucc_admin_session; if(!token) return null;
+  const session=ADMIN_SESSIONS.get(token);
+  if(!session || session.expiresAt<=Date.now()){if(session)ADMIN_SESSIONS.delete(token);return null;}
+  if(session.department!=='__staff__' || !normalizeStaffUnits(session.identity?.units).length) return null;
+  session.expiresAt=Date.now()+(Number(session.ttlMs)||ADMIN_SESSION_TTL_MS);
+  return session.identity;
+}
 
 function safeEqual(a, b) {
   const aa = Buffer.from(String(a));
@@ -448,13 +473,18 @@ function normalizeAdminDepartments(value) {
   const source = Array.isArray(value) ? value : String(value || '').split(',');
   return [...new Set(source.map(v => String(v || '').trim()).filter(v => departmentFromSlug(v)))];
 }
+function normalizeStaffUnits(value) {
+  const source = Array.isArray(value) ? value : String(value || '').split(',');
+  return [...new Set(source.map(v => String(v || '').trim()).filter(v => Object.prototype.hasOwnProperty.call(STAFF_UNITS, v)))];
+}
+function staffUnitNames(units) { return normalizeStaffUnits(units).map(unit => STAFF_UNITS[unit].label); }
 function publicAdminUser(user) {
   const passwordSet=Boolean(user.passwordHash && user.passwordSalt);
   const invitationExpiresAt=user.invitationExpiresAt || null;
   const invitationExpired=Boolean(invitationExpiresAt && new Date(invitationExpiresAt).getTime() <= Date.now());
   return {
     id:user.id, name:user.name || user.username, username:user.username, email:user.email || '',
-    role:user.role || 'viewer', departments:user.departments || [], sections:user.sections || [],
+    role:user.role || 'viewer', departments:user.departments || [], sections:user.sections || [], units:normalizeStaffUnits(user.units),
     active:user.active !== false, createdAt:user.createdAt || null,
     passwordSet, passwordSetAt:user.passwordSetAt || null,
     invitationSentAt:user.invitationSentAt || null, invitationExpiresAt,
@@ -479,17 +509,20 @@ function requestBaseUrl(req) {
   const protocol=forwarded || req.protocol || 'https';
   return `${protocol}://${req.get('host')}`.replace(/\/$/, '');
 }
-function adminLoginLinks(departments, baseUrl) {
-  return (departments || []).map(slug=>({slug,name:departmentFromSlug(slug)?.name || slug,url:`${baseUrl}/admin/${encodeURIComponent(slug)}`}));
+function adminLoginLinks(departments, baseUrl, units=[]) {
+  const links=(departments || []).map(slug=>({slug,name:departmentFromSlug(slug)?.name || slug,url:`${baseUrl}/admin/${encodeURIComponent(slug)}`}));
+  if(normalizeStaffUnits(units).length) links.unshift({slug:'staff',name:'Functional Units Staff Portal',url:`${baseUrl}/staff`});
+  return links;
 }
-async function sendAdminPasswordSetupEmail({to,name,username,role,departments,sections,setupUrl,expiresAt,baseUrl,isReset=false}) {
+async function sendAdminPasswordSetupEmail({to,name,username,role,departments,sections,units=[],setupUrl,expiresAt,baseUrl,isReset=false}) {
   const deptNames=(departments || []).map(slug=>departmentFromSlug(slug)?.name || slug);
+  const unitNames=staffUnitNames(units);
   const sectionNames=(sections || []).map(section=>section==='project-work'?'Undergraduate Project Work':section==='field-experience'?'Field Experience and Teaching Practice':section==='dissertation'?'Dissertation Submission':section==='assessor'?'Assessment/Vetting Reports':section==='payroll'?'Payroll Portal':section==='auditor'?"Auditor's Portal":section);
   const expiryText=new Date(expiresAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'})+' UTC';
-  const portalRows=adminLoginLinks(departments,baseUrl).map(x=>`<li><a href="${htmlEscape(x.url)}">${htmlEscape(x.name)} Administration Portal</a></li>`).join('');
+  const portalRows=adminLoginLinks(departments,baseUrl,units).map(x=>`<li><a href="${htmlEscape(x.url)}">${htmlEscape(x.name)} Administration Portal</a></li>`).join('');
   const subject=isReset?'UCC Submission Portal password reset':'Your UCC Submission Portal administrator account';
   const action=isReset?'reset your administrator password':'set your administrator password';
-  const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">${isReset?'Password Reset':'Administrator Account Invitation'}</h2><p>Dear ${htmlEscape(name)},</p><p>${isReset?'A secure password-reset link has been issued for your':'An individual administrator account has been created for you on the'} UCC Academic Submission Portal.</p><div style="margin:18px 0;padding:16px;background:#f5f7fa;border-left:4px solid #d4a72c"><strong>Temporary account credential</strong><br>Username: <strong>${htmlEscape(username)}</strong><br>Password: <strong>Set by you using the one-time link below</strong></div><p><a href="${htmlEscape(setupUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">${isReset?'Set New Password':'Set Your Password'}</a></p><p>This one-time link expires on <strong>${htmlEscape(expiryText)}</strong>. After the password is set, the link cannot be used again.</p><p><strong>Role:</strong> ${htmlEscape(role)}<br><strong>Department access:</strong> ${htmlEscape(deptNames.join(', '))}<br><strong>Section access:</strong> ${htmlEscape(sectionNames.join(', '))}</p><p>After setting your password, sign in to the department administration portal using the username above and the password you create:</p><ul>${portalRows}</ul><p>If you did not expect this account, do not use the link and contact the portal administrator.</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+  const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">${isReset?'Password Reset':'Staff Account Invitation'}</h2><p>Dear ${htmlEscape(name)},</p><p>${isReset?'A secure password-reset link has been issued for your':'An individual staff account has been created for you on the'} CoDE Academic Services Portal.</p><div style="margin:18px 0;padding:16px;background:#f5f7fa;border-left:4px solid #d4a72c"><strong>Temporary account credential</strong><br>Username: <strong>${htmlEscape(username)}</strong><br>Password: <strong>Set by you using the one-time link below</strong></div><p><a href="${htmlEscape(setupUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">${isReset?'Set New Password':'Set Your Password'}</a></p><p>This one-time link expires on <strong>${htmlEscape(expiryText)}</strong>. After the password is set, the link cannot be used again.</p><p><strong>Role:</strong> ${htmlEscape(role)}<br><strong>Functional unit access:</strong> ${htmlEscape(unitNames.join(', ') || 'None')}<br><strong>Department access:</strong> ${htmlEscape(deptNames.join(', ') || 'None')}<br><strong>Section access:</strong> ${htmlEscape(sectionNames.join(', ') || 'None')}</p><p>After setting your password, use the appropriate portal below:</p><ul>${portalRows}</ul><p>If you did not expect this account, do not use the link and contact the portal administrator.</p><p>Regards,<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
   return sendGmailHtmlEmail({to,subject,html});
 }
 async function verifyDepartmentCredentials(slug,user,pass) {
@@ -502,6 +535,32 @@ async function verifyDepartmentCredentials(slug,user,pass) {
   const account=accounts.find(a=>a.active!==false&&String(a.username||'').toLowerCase()===String(user||'').toLowerCase());
   if(!account || !(account.departments||[]).includes(slug) || !verifyPassword(pass,account.passwordSalt,account.passwordHash)) return null;
   return {...publicAdminUser(account),master:false};
+}
+async function verifyStaffCredentials(user, pass) {
+  const account=(await readAdminUsers()).find(item => item.active!==false && normalizeStaffUnits(item.units).length && String(item.username||'').toLowerCase()===String(user||'').toLowerCase());
+  if(!account || !verifyPassword(pass, account.passwordSalt, account.passwordHash)) return null;
+  return {...publicAdminUser(account),master:false};
+}
+async function staffAuth(req,res,next) {
+  try {
+    const session=staffSessionIdentity(req);
+    if(session){req.staffIdentity=session;return next();}
+    const header=req.headers.authorization||'';
+    if(header.startsWith('Basic ')){
+      const decoded=Buffer.from(header.slice(6),'base64').toString('utf8'); const sep=decoded.indexOf(':');
+      const identity=await verifyStaffCredentials(sep>=0?decoded.slice(0,sep):decoded,sep>=0?decoded.slice(sep+1):'');
+      if(identity){req.staffIdentity=identity;return next();}
+    }
+    const wantsHtml=req.method==='GET'&&!req.path.startsWith('/api/')&&(String(req.headers.accept||'').includes('text/html')||!req.headers.accept);
+    return wantsHtml?res.redirect(`/staff-login.html?next=${encodeURIComponent(req.originalUrl||'/staff')}`):res.status(401).json({error:'Functional unit staff authentication required.'});
+  } catch(error) { console.error('Staff authentication failed:',error); return res.status(401).json({error:'Invalid functional unit staff credentials.'}); }
+}
+function requireStaffUnit(unit, minimumRole='viewer') {
+  return (req,res,next) => {
+    const identity=req.staffIdentity||{};
+    if(normalizeStaffUnits(identity.units).includes(unit) && (ROLE_RANK[identity.role]||0)>=(ROLE_RANK[minimumRole]||1)) return next();
+    return res.status(403).json({error:'Your staff account does not have the required functional-unit access.'});
+  };
 }
 async function departmentAuth(req, res, next) {
   const slug=String(req.params.department||''); const dept=departmentFromSlug(slug);
@@ -568,6 +627,26 @@ function developerAuth(req, res, next) {
   } catch {
     return res.status(401).send('Invalid developer credentials.');
   }
+}
+async function supportWorkspaceAuth(req, res, next) {
+  const header=req.headers.authorization||'';
+  if(header.startsWith('Basic ')){
+    try {
+      const decoded=Buffer.from(header.slice(6),'base64').toString('utf8'); const sep=decoded.indexOf(':');
+      const user=sep>=0?decoded.slice(0,sep):decoded,pass=sep>=0?decoded.slice(sep+1):'';
+      if(safeEqual(user,DEVELOPER_ADMIN_USER)&&safeEqual(pass,DEVELOPER_ADMIN_PASSWORD)){req.supportIdentity={name:'Developer',role:'administrator',developer:true};return next();}
+    } catch {}
+  }
+  return staffAuth(req,res,()=>{
+    const identity=req.staffIdentity||{};
+    if(!normalizeStaffUnits(identity.units).includes('student-support')) return res.status(403).json({error:'Student Support Services access is required.'});
+    req.supportIdentity=identity;
+    next();
+  });
+}
+function requireSupportRole(minimumRole='viewer') {
+  return (req,res,next) => (ROLE_RANK[req.supportIdentity?.role]||0)>=(ROLE_RANK[minimumRole]||1)
+    ? next() : res.status(403).json({error:'Your Student Support account does not have permission for this action.'});
 }
 
 const DEVELOPER_PREVIEW_PROFILES = {
@@ -1791,9 +1870,9 @@ app.get('/api/support/tickets/:reference', async (req, res) => {
 const SUPPORT_STATUS_LABELS = Object.freeze({
   received: 'Received', triaged: 'Triaged', assigned: 'Assigned', 'awaiting-student': 'Awaiting student', 'in-progress': 'In progress', resolved: 'Resolved', reopened: 'Reopened', closed: 'Closed'
 });
-app.get('/support-admin', developerAuth, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'support-admin.html')));
-app.get('/support-admin.js', developerAuth, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'support-admin.js')));
-app.get('/api/support/admin/tickets', developerAuth, async (_req, res) => {
+app.get('/support-admin', supportWorkspaceAuth, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'support-admin.html')));
+app.get('/support-admin.js', supportWorkspaceAuth, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'support-admin.js')));
+app.get('/api/support/admin/tickets', supportWorkspaceAuth, async (_req, res) => {
   const tickets = await readSupportTickets();
   res.json({ ok: true, tickets: tickets.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).map(ticket => ({
     id: ticket.id, reference: ticket.reference, name: ticket.name, email: ticket.email, type: ticket.type, studyLevel: ticket.studyLevelLabel || '',
@@ -1803,7 +1882,7 @@ app.get('/api/support/admin/tickets', developerAuth, async (_req, res) => {
     dueAt: ticket.dueAt, lastUpdatedAt: ticket.lastUpdatedAt, resolution: ticket.resolution || '', auditTrail: ticket.auditTrail || [], evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [], forwardHistory: ticket.forwardHistory || []
   })) });
 });
-app.patch('/api/support/admin/tickets/:id', developerAuth, async (req, res) => {
+app.patch('/api/support/admin/tickets/:id', supportWorkspaceAuth, requireSupportRole('officer'), async (req, res) => {
   const nextStatus = String(req.body?.status || '').trim();
   if (!Object.prototype.hasOwnProperty.call(SUPPORT_STATUS_LABELS, nextStatus)) return res.status(400).json({ error: 'Choose a valid ticket status.' });
   const ownerUnit = cleanHumanText(req.body?.ownerUnit).slice(0, 180);
@@ -1857,7 +1936,7 @@ function secureSupportForwardPage(ticket, forward, token) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${htmlEscape(ticket.reference)} | CoDE Academic Services</title><style>body{margin:0;background:#f4f7fa;color:#162331;font:16px/1.55 Arial,sans-serif}.wrap{max-width:800px;margin:38px auto;padding:0 20px}.card{background:#fff;border:1px solid #dce4eb;border-radius:14px;padding:26px;box-shadow:0 10px 28px rgba(15,38,61,.09)}h1,h2{color:#082b4c}h1{margin:0 0 4px;font-size:25px}h2{font-size:17px;margin:24px 0 8px}.tag{color:#936b00;font-weight:bold;font-size:12px;letter-spacing:.08em}.meta{display:grid;grid-template-columns:170px 1fr;gap:7px 14px;background:#f7fafc;border-radius:9px;padding:14px}.meta b{color:#082b4c}.copy{white-space:pre-wrap}.notice{margin-top:20px;padding:12px 14px;border-left:4px solid #d4a72c;background:#fff8df;color:#5c4a14;font-size:13px}a{color:#082b4c;font-weight:bold}</style></head><body><main class="wrap"><section class="card"><p class="tag">STUDENT SUPPORT FORWARD</p><h1>${htmlEscape(ticket.reference)}</h1><p>This matter was sent to <strong>${htmlEscape(forward.officeName)}</strong> by Student Support Services.</p><div class="meta"><b>Category</b><span>${htmlEscape(ticket.categoryLabel)}</span><b>Learner level</b><span>${htmlEscape(ticket.studyLevelLabel || 'Not stated')}</span><b>Student</b><span>${htmlEscape(ticket.name)}</span><b>Index / student number</b><span>${htmlEscape(ticket.studentNumber || 'Not stated')}</span><b>Study centre</b><span>${htmlEscape(ticket.studyCentre || 'Not stated')}</span><b>Subject</b><span>${htmlEscape(ticket.subject)}</span></div><h2>Student description</h2><p class="copy">${htmlEscape(ticket.description)}</p><h2>Student Support comments</h2><p class="copy">${htmlEscape(forward.comment)}</p><h2>Evidence files</h2>${evidenceHtml}<p class="notice">This is a confidential, time-limited link. Do not forward it outside the office handling this matter.</p></section></main></body></html>`;
 }
 
-app.get('/api/support/admin/tickets/:id/evidence/:index', developerAuth, async (req, res) => {
+app.get('/api/support/admin/tickets/:id/evidence/:index', supportWorkspaceAuth, async (req, res) => {
   const ticket = (await readSupportTickets()).find(item => item.id === req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Support ticket not found.' });
   const evidence = supportEvidenceFor(ticket, req.params.index);
@@ -1865,7 +1944,7 @@ app.get('/api/support/admin/tickets/:id/evidence/:index', developerAuth, async (
   return sendSupportEvidence(res, evidence);
 });
 
-app.post('/api/support/admin/tickets/:id/forward', developerAuth, async (req, res) => {
+app.post('/api/support/admin/tickets/:id/forward', supportWorkspaceAuth, requireSupportRole('officer'), async (req, res) => {
   const officeName = cleanHumanText(req.body?.officeName).slice(0, 180);
   const officeEmail = String(req.body?.officeEmail || '').trim().toLowerCase();
   const comment = String(req.body?.comment || '').trim().slice(0, 4000);
@@ -3341,24 +3420,23 @@ app.post('/api/developer/admin-users', developerAuth, async(req,res)=>{
   const name=cleanHumanText(req.body?.name).slice(0,160),email=cleanHumanText(req.body?.email).toLowerCase().slice(0,254);
   const requestedUsername=cleanHumanText(req.body?.username).toLowerCase().slice(0,100);
   const username=requestedUsername || email;
-  const role=String(req.body?.role||'viewer').trim();const departments=normalizeAdminDepartments(req.body?.departments);const sections=normalizeAdminSections(req.body?.sections);
+  const role=String(req.body?.role||'viewer').trim();const departments=normalizeAdminDepartments(req.body?.departments);const sections=normalizeAdminSections(req.body?.sections);const units=normalizeStaffUnits(req.body?.units);
   if(!name||!isEmail(email)||!username)return res.status(400).json({error:'Administrator name and a valid email address are required.'});
   if(!/^[a-z0-9._@-]+$/i.test(username))return res.status(400).json({error:'Username may contain letters, numbers, dots, underscores, @ and hyphens only.'});
   if(!ADMIN_ROLES.has(role))return res.status(400).json({error:'Select a valid role.'});
-  if(!departments.length)return res.status(400).json({error:'Assign at least one department.'});
-  if(!sections.length)return res.status(400).json({error:'Assign at least one portal section.'});
+  if(!departments.length&&!units.length)return res.status(400).json({error:'Assign at least one functional unit or department.'});
   let error='';let created=null;const invitation=newAdminInvitation();
   await mutateAdminUsers(list=>{
     if(list.some(a=>String(a.username||'').toLowerCase()===username)){error='That administrator username already exists.';return null;}
     if(list.some(a=>String(a.email||'').toLowerCase()===email)){error='That administrator email address already has an account.';return null;}
-    created={id:crypto.randomUUID(),name,email,username,role,departments,sections,active:true,createdAt:new Date().toISOString(),invitationTokenHash:invitation.tokenHash,invitationExpiresAt:invitation.expiresAt,invitationEmailStatus:'pending'};
+    created={id:crypto.randomUUID(),name,email,username,role,departments,sections,units,active:true,createdAt:new Date().toISOString(),invitationTokenHash:invitation.tokenHash,invitationExpiresAt:invitation.expiresAt,invitationEmailStatus:'pending'};
     list.push(created);return created;
   });
   if(error)return res.status(400).json({error});
   const baseUrl=requestBaseUrl(req),setupUrl=`${baseUrl}/admin-set-password.html?token=${encodeURIComponent(invitation.token)}`;
   let emailSent=false,warning='';
   try{
-    await sendAdminPasswordSetupEmail({to:email,name,username,role,departments,sections,setupUrl,expiresAt:invitation.expiresAt,baseUrl});
+    await sendAdminPasswordSetupEmail({to:email,name,username,role,departments,sections,units,setupUrl,expiresAt:invitation.expiresAt,baseUrl});
     emailSent=true;
     await mutateAdminUsers(list=>{const a=list.find(x=>x.id===created.id);if(a){a.invitationEmailStatus='sent';a.invitationSentAt=new Date().toISOString();a.invitationLastError=null;}return null;});
   }catch(e){
@@ -3375,7 +3453,7 @@ app.post('/api/developer/admin-users/:id/resend-invitation', developerAuth, asyn
   if(!account)return res.status(404).json({error:'Administrator account not found or does not have a valid email address.'});
   const baseUrl=requestBaseUrl(req),setupUrl=`${baseUrl}/admin-set-password.html?token=${encodeURIComponent(invitation.token)}`;
   try{
-    await sendAdminPasswordSetupEmail({to:account.email,name:account.name||account.username,username:account.username,role:account.role||'viewer',departments:account.departments||[],sections:account.sections||[],setupUrl,expiresAt:invitation.expiresAt,baseUrl,isReset:Boolean(account.passwordHash)});
+    await sendAdminPasswordSetupEmail({to:account.email,name:account.name||account.username,username:account.username,role:account.role||'viewer',departments:account.departments||[],sections:account.sections||[],units:account.units||[],setupUrl,expiresAt:invitation.expiresAt,baseUrl,isReset:Boolean(account.passwordHash)});
     await mutateAdminUsers(list=>{const a=list.find(x=>x.id===req.params.id);if(a){a.invitationEmailStatus='sent';a.invitationSentAt=new Date().toISOString();a.invitationLastError=null;}return null;});
     const updated=(await readAdminUsers()).find(x=>x.id===req.params.id);
     return res.json({ok:true,emailSent:true,user:publicAdminUser(updated)});
@@ -3387,8 +3465,8 @@ app.post('/api/developer/admin-users/:id/resend-invitation', developerAuth, asyn
   }
 });
 app.patch('/api/developer/admin-users/:id', developerAuth, async(req,res)=>{
-  const role=req.body?.role?String(req.body.role).trim():null;const departments=req.body?.departments!==undefined?normalizeAdminDepartments(req.body.departments):null;const sections=req.body?.sections!==undefined?normalizeAdminSections(req.body.sections):null;
-  let item=null;await mutateAdminUsers(list=>{const a=list.find(x=>x.id===req.params.id);if(!a)return null;if(role&&ADMIN_ROLES.has(role))a.role=role;if(departments?.length)a.departments=departments;if(sections?.length)a.sections=sections;if(req.body?.active!==undefined)a.active=Boolean(req.body.active);item=publicAdminUser(a);return item;});
+  const role=req.body?.role?String(req.body.role).trim():null;const departments=req.body?.departments!==undefined?normalizeAdminDepartments(req.body.departments):null;const sections=req.body?.sections!==undefined?normalizeAdminSections(req.body.sections):null;const units=req.body?.units!==undefined?normalizeStaffUnits(req.body.units):null;
+  let item=null;await mutateAdminUsers(list=>{const a=list.find(x=>x.id===req.params.id);if(!a)return null;if(role&&ADMIN_ROLES.has(role))a.role=role;if(departments!==null)a.departments=departments;if(sections!==null)a.sections=sections;if(units!==null)a.units=units;if(req.body?.active!==undefined)a.active=Boolean(req.body.active);if(!(a.departments||[]).length&&!normalizeStaffUnits(a.units).length)return null;item=publicAdminUser(a);return item;});
   if(!item)return res.status(404).json({error:'Administrator account not found.'});res.json({ok:true,user:item});
 });
 app.delete('/api/developer/admin-users/:id', developerAuth, async(req,res)=>{let removed=false;await mutateAdminUsers(list=>{const i=list.findIndex(x=>x.id===req.params.id);if(i>=0){list.splice(i,1);removed=true;}return removed;});if(!removed)return res.status(404).json({error:'Administrator account not found.'});res.json({ok:true});});
@@ -3402,7 +3480,7 @@ app.get('/api/admin-invitation/:token', async(req,res)=>{
   if(a.active===false)return res.status(403).json({error:'This administrator account is disabled. Contact the portal administrator.'});
   if(!a.invitationExpiresAt||new Date(a.invitationExpiresAt).getTime()<=Date.now())return res.status(410).json({error:'This password setup link has expired. Ask the portal developer to send a new link.'});
   const baseUrl=requestBaseUrl(req);
-  res.json({ok:true,name:a.name||a.username,username:a.username,email:a.email||'',role:a.role||'viewer',departments:(a.departments||[]).map(slug=>({slug,name:departmentFromSlug(slug)?.name||slug})),sections:a.sections||[],expiresAt:a.invitationExpiresAt,passwordAlreadySet:Boolean(a.passwordHash),loginUrls:adminLoginLinks(a.departments||[],baseUrl)});
+  res.json({ok:true,name:a.name||a.username,username:a.username,email:a.email||'',role:a.role||'viewer',departments:(a.departments||[]).map(slug=>({slug,name:departmentFromSlug(slug)?.name||slug})),units:normalizeStaffUnits(a.units).map(slug=>({slug,name:STAFF_UNITS[slug].label})),sections:a.sections||[],expiresAt:a.invitationExpiresAt,passwordAlreadySet:Boolean(a.passwordHash),loginUrls:adminLoginLinks(a.departments||[],baseUrl,a.units||[])});
 });
 app.post('/api/admin-invitation/:token/set-password', async(req,res)=>{
   const token=String(req.params.token||''),password=String(req.body?.password||''),confirmPassword=String(req.body?.confirmPassword||'');
@@ -3413,7 +3491,7 @@ app.post('/api/admin-invitation/:token/set-password', async(req,res)=>{
   await mutateAdminUsers(list=>{const a=list.find(x=>x.invitationTokenHash===tokenHash);if(!a){error='This password setup link is invalid or has already been used.';return null;}if(a.active===false){error='This administrator account is disabled.';return null;}if(!a.invitationExpiresAt||new Date(a.invitationExpiresAt).getTime()<=Date.now()){error='This password setup link has expired. Ask the portal developer to send a new link.';return null;}const pw=hashPassword(password);a.passwordSalt=pw.salt;a.passwordHash=pw.hash;a.passwordSetAt=new Date().toISOString();a.invitationAcceptedAt=a.passwordSetAt;delete a.invitationTokenHash;delete a.invitationExpiresAt;a.invitationEmailStatus='accepted';a.invitationLastError=null;updated={...a};return updated;});
   if(error)return res.status(error.includes('expired')?410:400).json({error});
   const baseUrl=requestBaseUrl(req);
-  res.json({ok:true,message:'Your administrator password has been set successfully.',user:publicAdminUser(updated),loginUrls:adminLoginLinks(updated.departments||[],baseUrl)});
+  res.json({ok:true,message:'Your staff password has been set successfully.',user:publicAdminUser(updated),loginUrls:adminLoginLinks(updated.departments||[],baseUrl,updated.units||[])});
 });
 
 // DEPARTMENT ADMIN: dissertation assignment by secure emailed link
@@ -3603,6 +3681,26 @@ app.post('/api/admin-login',async(req,res)=>{
 });
 app.post('/api/admin-logout',(req,res)=>{clearAdminSession(req);res.clearCookie('ucc_admin_session',{path:'/'});res.json({ok:true,redirect:'/'});});
 app.get('/admin/logout',(req,res)=>{clearAdminSession(req);res.clearCookie('ucc_admin_session',{path:'/'});res.redirect('/');});
+
+// FUNCTIONAL UNITS STAFF PORTAL
+app.get('/staff-login.html',(_req,res)=>res.sendFile(path.join(__dirname,'public','staff-login.html')));
+app.post('/api/staff-login',async(req,res)=>{
+  const username=String(req.body?.username||'').trim(),password=String(req.body?.password||'');
+  const identity=await verifyStaffCredentials(username,password);
+  if(!identity)return res.status(401).json({error:'Invalid username or password, or this account has no functional-unit access.'});
+  const token=createAdminSession(identity,'__staff__');
+  res.cookie('ucc_admin_session',token,{httpOnly:true,secure:req.secure||String(req.headers['x-forwarded-proto']||'').includes('https'),sameSite:'lax',maxAge:ADMIN_SESSION_TTL_MS,path:'/'});
+  res.json({ok:true,redirect:'/staff'});
+});
+app.get('/staff',staffAuth,(_req,res)=>res.sendFile(path.join(__dirname,'public','staff.html')));
+app.get('/staff.js',staffAuth,(_req,res)=>res.sendFile(path.join(__dirname,'public','staff.js')));
+app.get('/api/staff/me',staffAuth,async(req,res)=>{
+  const identity=req.staffIdentity;
+  const units=normalizeStaffUnits(identity.units).map(id=>({id,...STAFF_UNITS[id]}));
+  const tickets=await readSupportTickets();
+  const supportCount=units.some(unit=>unit.id==='student-support')?tickets.filter(ticket=>!['resolved','closed'].includes(ticket.status)).length:0;
+  res.json({ok:true,staff:{name:identity.name||identity.username,username:identity.username,role:identity.role,units,departments:normalizeAdminDepartments(identity.departments),sections:normalizeAdminSections(identity.sections)},metrics:{openSupportTickets:supportCount}});
+});
 
 // Public admin chooser. Department data remain protected behind department-specific credentials.
 app.get('/admin',(_req,res)=>res.sendFile(path.join(__dirname,'admin','chooser.html')));
