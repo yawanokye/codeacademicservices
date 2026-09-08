@@ -1920,7 +1920,7 @@ app.get('/api/support/admin/tickets', supportWorkspaceAuth, async (_req, res) =>
     category: ticket.categoryLabel, priority: ticket.priorityLabel, status: ticket.status, statusLabel: SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,
     ownerUnit: ticket.ownerUnit, supportUnit: ticket.supportUnit, studyCentre: ticket.studyCentre, subject: ticket.subject,
     description: ticket.description, originRole: ticket.originRole, sensitive: ticket.sensitive, createdAt: ticket.createdAt,
-    dueAt: ticket.dueAt, lastUpdatedAt: ticket.lastUpdatedAt, resolution: ticket.resolution || '', auditTrail: ticket.auditTrail || [], studentUpdates:ticket.studentUpdates||[], evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [], officerEvidence:Array.isArray(ticket.officerEvidence)?ticket.officerEvidence:[], forwardHistory: ticket.forwardHistory || [], interUnitMessages:ticket.interUnitMessages||[]
+    dueAt: ticket.dueAt, lastUpdatedAt: ticket.lastUpdatedAt, resolution: ticket.resolution || '', auditTrail: ticket.auditTrail || [], studentUpdates:ticket.studentUpdates||[], evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [], officerEvidence:Array.isArray(ticket.officerEvidence)?ticket.officerEvidence:[], forwardHistory: ticket.forwardHistory || [], referrals: ticket.referrals || [], interUnitMessages:ticket.interUnitMessages||[]
   })) });
 });
 app.patch('/api/support/admin/tickets/:id', supportWorkspaceAuth, requireSupportRole('officer'), async (req, res) => {
@@ -1974,11 +1974,12 @@ function supportForwardForToken(tickets, token) {
   return null;
 }
 function secureSupportForwardPage(ticket, forward, token) {
-  const evidence = Array.isArray(ticket.evidence) ? ticket.evidence : [];
-  const evidenceHtml = evidence.length
-    ? `<ul>${evidence.map((file, index) => `<li><a href="/secure/support/${encodeURIComponent(token)}/evidence/${index}" target="_blank" rel="noopener">Open ${htmlEscape(file.originalName || `evidence ${index + 1}`)}</a></li>`).join('')}</ul>`
-    : '<p>No evidence files were attached.</p>';
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${htmlEscape(ticket.reference)} | CoDE Academic Services</title><style>body{margin:0;background:#f4f7fa;color:#162331;font:16px/1.55 Arial,sans-serif}.wrap{max-width:800px;margin:38px auto;padding:0 20px}.card{background:#fff;border:1px solid #dce4eb;border-radius:14px;padding:26px;box-shadow:0 10px 28px rgba(15,38,61,.09)}h1,h2{color:#082b4c}h1{margin:0 0 4px;font-size:25px}h2{font-size:17px;margin:24px 0 8px}.tag{color:#936b00;font-weight:bold;font-size:12px;letter-spacing:.08em}.meta{display:grid;grid-template-columns:170px 1fr;gap:7px 14px;background:#f7fafc;border-radius:9px;padding:14px}.meta b{color:#082b4c}.copy{white-space:pre-wrap}.notice{margin-top:20px;padding:12px 14px;border-left:4px solid #d4a72c;background:#fff8df;color:#5c4a14;font-size:13px}a{color:#082b4c;font-weight:bold}</style></head><body><main class="wrap"><section class="card"><p class="tag">STUDENT SUPPORT FORWARD</p><h1>${htmlEscape(ticket.reference)}</h1><p>This matter was sent to <strong>${htmlEscape(forward.officeName)}</strong> by Student Support Services.</p><div class="meta"><b>Category</b><span>${htmlEscape(ticket.categoryLabel)}</span><b>Learner level</b><span>${htmlEscape(ticket.studyLevelLabel || 'Not stated')}</span><b>Student</b><span>${htmlEscape(ticket.name)}</span><b>Index / student number</b><span>${htmlEscape(ticket.studentNumber || 'Not stated')}</span><b>Study centre</b><span>${htmlEscape(ticket.studyCentre || 'Not stated')}</span><b>Subject</b><span>${htmlEscape(ticket.subject)}</span></div><h2>Student description</h2><p class="copy">${htmlEscape(ticket.description)}</p><h2>Student Support comments</h2><p class="copy">${htmlEscape(forward.comment)}</p><h2>Evidence files</h2>${evidenceHtml}<p class="notice">This is a confidential, time-limited link. Do not forward it outside the office handling this matter.</p></section></main></body></html>`;
+  const framedEvidence = (files, collection, emptyText) => Array.isArray(files) && files.length
+    ? `<div class="evidence">${files.map((file, index) => { const url=`/secure/support/${encodeURIComponent(token)}/${collection}/${index}`; const name=htmlEscape(file.originalName || `evidence ${index + 1}`); return `<section><strong>${name}</strong><iframe src="${url}" title="${name}"></iframe><a href="${url}" target="_blank" rel="noopener">Open in new tab</a></section>`; }).join('')}</div>`
+    : `<p>${emptyText}</p>`;
+  const studentEvidenceHtml = framedEvidence(ticket.evidence, 'evidence', 'No student evidence files were attached.');
+  const officerEvidenceHtml = framedEvidence(ticket.officerEvidence, 'officer-evidence', 'No officer evidence files were attached.');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${htmlEscape(ticket.reference)} | CoDE Academic Services</title><style>body{margin:0;background:#f4f7fa;color:#162331;font:16px/1.55 Arial,sans-serif}.wrap{max-width:800px;margin:38px auto;padding:0 20px}.card{background:#fff;border:1px solid #dce4eb;border-radius:14px;padding:26px;box-shadow:0 10px 28px rgba(15,38,61,.09)}h1,h2{color:#082b4c}h1{margin:0 0 4px;font-size:25px}h2{font-size:17px;margin:24px 0 8px}.tag{color:#936b00;font-weight:bold;font-size:12px;letter-spacing:.08em}.meta{display:grid;grid-template-columns:170px 1fr;gap:7px 14px;background:#f7fafc;border-radius:9px;padding:14px}.meta b{color:#082b4c}.copy{white-space:pre-wrap}.notice{margin-top:20px;padding:12px 14px;border-left:4px solid #d4a72c;background:#fff8df;color:#5c4a14;font-size:13px}a{color:#082b4c;font-weight:bold}.evidence{display:grid;gap:16px}.evidence section{display:grid;gap:8px;border-top:1px solid #dce4eb;padding-top:14px}.evidence section:first-child{border-top:0;padding-top:0}.evidence iframe{width:100%;height:500px;border:1px solid #cbd6df;border-radius:8px;background:#fff}</style></head><body><main class="wrap"><section class="card"><p class="tag">STUDENT SUPPORT FORWARD</p><h1>${htmlEscape(ticket.reference)}</h1><p>This matter was sent to <strong>${htmlEscape(forward.officeName)}</strong> by Student Support Services.</p><div class="meta"><b>Category</b><span>${htmlEscape(ticket.categoryLabel)}</span><b>Learner level</b><span>${htmlEscape(ticket.studyLevelLabel || 'Not stated')}</span><b>Student</b><span>${htmlEscape(ticket.name)}</span><b>Index / student number</b><span>${htmlEscape(ticket.studentNumber || 'Not stated')}</span><b>Study centre</b><span>${htmlEscape(ticket.studyCentre || 'Not stated')}</span><b>Subject</b><span>${htmlEscape(ticket.subject)}</span></div><h2>Student description</h2><p class="copy">${htmlEscape(ticket.description)}</p><h2>Student Support comments</h2><p class="copy">${htmlEscape(forward.comment)}</p><h2>Student evidence</h2>${studentEvidenceHtml}<h2>Officer evidence</h2>${officerEvidenceHtml}<p class="notice">This is a confidential, time-limited link. Do not forward it outside the office handling this matter.</p></section></main></body></html>`;
 }
 
 app.get('/api/support/admin/tickets/:id/evidence/:index', supportWorkspaceAuth, async (req, res) => {
@@ -2038,12 +2039,13 @@ app.post('/api/support/admin/tickets/:id/messages', supportWorkspaceAuth, requir
 });
 
 app.post('/api/support/admin/tickets/:id/forward', supportWorkspaceAuth, requireSupportRole('officer'), async (req, res) => {
+  const recipientUnit = String(req.body?.recipientUnit || '').trim();
   const officeName = cleanHumanText(req.body?.officeName).slice(0, 180);
   const officeEmail = String(req.body?.officeEmail || '').trim().toLowerCase();
   const comment = String(req.body?.comment || '').trim().slice(0, 4000);
+  if (!Object.prototype.hasOwnProperty.call(STAFF_UNITS, recipientUnit)) return res.status(400).json({ error: 'Select the receiving functional unit.' });
   if (!officeName || !officeEmail || !comment) return res.status(400).json({ error: 'Office name, official office email and Student Support comments are required.' });
   if (!isEmail(officeEmail)) return res.status(400).json({ error: 'Enter a valid official office email address.' });
-  if (!gmailConfigured()) return res.status(503).json({ error: 'Forwarding email is not configured yet. Ask the platform administrator to configure Gmail delivery.' });
   const rawToken = crypto.randomBytes(32).toString('hex');
   const forwardId = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -2052,10 +2054,13 @@ app.post('/api/support/admin/tickets/:id/forward', supportWorkspaceAuth, require
   await mutateSupportTickets(tickets => {
     const ticket = tickets.find(item => item.id === req.params.id);
     if (!ticket) return null;
-    const forward = { id: forwardId, officeName, officeEmail, comment, tokenHash: hashOneTimeToken(rawToken), createdAt: now, expiresAt, status: 'pending' };
+    const forward = { id: forwardId, recipientUnit, officeName, officeEmail, comment, tokenHash: hashOneTimeToken(rawToken), createdAt: now, expiresAt, status: 'pending' };
     ticket.forwardHistory = Array.isArray(ticket.forwardHistory) ? ticket.forwardHistory : [];
     ticket.forwardHistory.push(forward);
-    ticket.ownerUnit = officeName;
+    ticket.referrals = Array.isArray(ticket.referrals) ? ticket.referrals : [];
+    ticket.referrals.push({ id: forwardId, sourceUnit: 'student-support', sourceLabel: STAFF_UNITS['student-support'].label, targetUnit: recipientUnit, targetLabel: STAFF_UNITS[recipientUnit].label, officeName, officeEmail, comment, status: 'registered', createdAt: now, reassignmentHistory: [] });
+    ticket.ownerUnit = STAFF_UNITS[recipientUnit].label;
+    ticket.assignedCaseOwner = req.supportIdentity?.name || 'Student Support Services';
     ticket.status = 'assigned';
     ticket.lastUpdatedAt = now;
     ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
@@ -2065,25 +2070,91 @@ app.post('/api/support/admin/tickets/:id/forward', supportWorkspaceAuth, require
     return ticket;
   });
   if (!ticketForEmail) return res.status(404).json({ error: 'Support ticket not found.' });
+  if (!gmailConfigured()) return res.json({ ok: true, reference: ticketForEmail.reference, expiresAt, emailStatus: 'not-configured', message: 'The case is registered in the receiving unit portal. Email notification is not configured yet.' });
   const secureUrl = `${baseUrlFor(req)}/secure/support/${rawToken}`;
   try {
     const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Student Support matter forwarded</h2><p>Student Support Services has forwarded a matter for your office's attention.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #d4a72c"><strong>Reference:</strong> ${htmlEscape(ticketForEmail.reference)}<br><strong>Category:</strong> ${htmlEscape(ticketForEmail.categoryLabel)}<br><strong>Learner level:</strong> ${htmlEscape(ticketForEmail.studyLevelLabel || 'Not stated')}<br><strong>Subject:</strong> ${htmlEscape(ticketForEmail.subject)}</div><p><strong>Student Support comments</strong><br>${htmlEscape(comment).replace(/\n/g, '<br>')}</p><p><a href="${htmlEscape(secureUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Open the confidential case file</a></p><p>This secure link includes the submitted evidence and expires on ${htmlEscape(new Date(expiresAt).toLocaleDateString('en-GB'))}. Do not forward it outside your office.</p><p>Regards,<br>Student Support Services<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
     const result = await sendGmailHtmlEmail({ to: officeEmail, subject: `Action required: ${ticketForEmail.reference} - ${ticketForEmail.subject}`, html });
     await mutateSupportTickets(tickets => {
-      const forward = tickets.find(item => item.id === req.params.id)?.forwardHistory?.find(item => item.id === forwardId);
+      const item=tickets.find(item => item.id === req.params.id);
+      const forward = item?.forwardHistory?.find(item => item.id === forwardId);
       if (forward) { forward.status = 'sent'; forward.sentAt = new Date().toISOString(); forward.messageId = result?.id || ''; }
+      const referral=item?.referrals?.find(item=>item.id===forwardId);
+      if(referral){referral.status='sent';referral.sentAt=new Date().toISOString();}
       return tickets;
     });
-    return res.json({ ok: true, reference: ticketForEmail.reference, expiresAt });
+    return res.json({ ok: true, reference: ticketForEmail.reference, expiresAt, emailStatus: 'sent' });
   } catch (error) {
     console.error('Support ticket forwarding failed:', error);
     await mutateSupportTickets(tickets => {
-      const forward = tickets.find(item => item.id === req.params.id)?.forwardHistory?.find(item => item.id === forwardId);
+      const item=tickets.find(item => item.id === req.params.id);
+      const forward = item?.forwardHistory?.find(item => item.id === forwardId);
       if (forward) { forward.status = 'failed'; forward.error = String(error.message || 'Email delivery failed').slice(0, 500); }
+      const referral=item?.referrals?.find(item=>item.id===forwardId);
+      if(referral){referral.status='registered';referral.deliveryError=String(error.message||'Email delivery failed').slice(0,500);}
       return tickets;
     });
-    return res.status(502).json({ error: 'The ticket was prepared but the forwarding email could not be delivered. Check the office email and try again.' });
+    return res.json({ ok: true, reference: ticketForEmail.reference, expiresAt, emailStatus: 'failed', message: 'The case is registered in the receiving unit portal, but the email notification could not be delivered.' });
   }
+});
+
+function activeReferralForUnits(ticket, unitIds) {
+  const allowed = new Set(normalizeStaffUnits(unitIds));
+  return [...(Array.isArray(ticket?.referrals) ? ticket.referrals : [])].reverse().find(referral =>
+    allowed.has(referral.targetUnit) && !['reassigned', 'closed', 'cancelled'].includes(referral.status)
+  ) || null;
+}
+async function reassignSupportReferral(ticketId, { targetUnit, note, actor, sourceUnits, allowUnassigned=false }) {
+  let result = { state: 'not-found' };
+  await mutateSupportTickets(tickets => {
+    const ticket = tickets.find(item => item.id === ticketId);
+    if (!ticket) return tickets;
+    ticket.referrals = Array.isArray(ticket.referrals) ? ticket.referrals : [];
+    const current = activeReferralForUnits(ticket, sourceUnits);
+    if (!current && !allowUnassigned) { result = { state: 'not-assigned' }; return tickets; }
+    const sourceUnit = current?.targetUnit || 'student-support';
+    if (sourceUnit === targetUnit) { result = { state: 'same-unit' }; return tickets; }
+    const now = new Date().toISOString();
+    if (current) {
+      current.status = 'reassigned';
+      current.reassignedAt = now;
+      current.reassignmentHistory = Array.isArray(current.reassignmentHistory) ? current.reassignmentHistory : [];
+      current.reassignmentHistory.push({ at: now, by: actor, targetUnit, targetLabel: STAFF_UNITS[targetUnit].label, note });
+    }
+    const referral = {
+      id: crypto.randomUUID(), sourceUnit, sourceLabel: STAFF_UNITS[sourceUnit]?.label || sourceUnit,
+      targetUnit, targetLabel: STAFF_UNITS[targetUnit].label, status: 'assigned', origin: 'reassignment', comment: note,
+      createdAt: now, reassignmentHistory: []
+    };
+    ticket.referrals.push(referral);
+    ticket.ownerUnit = STAFF_UNITS[targetUnit].label;
+    ticket.assignedCaseOwner = actor;
+    ticket.status = 'assigned';
+    ticket.lastUpdatedAt = now;
+    ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
+    ticket.auditTrail.push({ action: `Case reassigned from ${STAFF_UNITS[sourceUnit]?.label || sourceUnit} to ${STAFF_UNITS[targetUnit].label}`, note, at: now, by: actor });
+    ticket.studentUpdates = Array.isArray(ticket.studentUpdates) ? ticket.studentUpdates : [];
+    ticket.studentUpdates.push({ label: 'Case reassigned', message: `Your case has been reassigned to ${STAFF_UNITS[targetUnit].label} for continued action.`, at: now });
+    if (ticket.auditTrail.length > 100) ticket.auditTrail = ticket.auditTrail.slice(-100);
+    result = { state: 'ok', ticket: JSON.parse(JSON.stringify(ticket)), referral };
+    return ticket;
+  });
+  return result;
+}
+function reassignSupportReferralResponse(result, res, req) {
+  if (result.state === 'not-found') return res.status(404).json({ error: 'Support ticket not found.' });
+  if (result.state === 'not-assigned') return res.status(403).json({ error: 'This case is not currently assigned to one of your functional units.' });
+  if (result.state === 'same-unit') return res.status(400).json({ error: 'Choose a different functional unit for reassignment.' });
+  sendSupportStudentUpdateEmail(result.ticket, { label: 'Case reassigned', message: `Your case has been reassigned to ${result.referral.targetLabel} for continued action.` }, req).catch(error => console.error('Support reassignment email failed:', error.message));
+  return res.json({ ok: true, reference: result.ticket.reference, referral: result.referral });
+}
+app.post('/api/support/admin/tickets/:id/reassign', supportWorkspaceAuth, requireSupportRole('officer'), async (req, res) => {
+  const targetUnit = String(req.body?.targetUnit || '').trim();
+  const note = String(req.body?.note || '').trim().slice(0, 2000);
+  if (!Object.prototype.hasOwnProperty.call(STAFF_UNITS, targetUnit)) return res.status(400).json({ error: 'Select the receiving functional unit.' });
+  if (!note) return res.status(400).json({ error: 'Provide reassignment comments for the receiving unit.' });
+  const result = await reassignSupportReferral(req.params.id, { targetUnit, note, actor: req.supportIdentity?.name || 'Student Support Services', sourceUnits: ['student-support'], allowUnassigned: true });
+  return reassignSupportReferralResponse(result, res, req);
 });
 
 app.get('/secure/support/:token', async (req, res) => {
@@ -2096,6 +2167,13 @@ app.get('/secure/support/:token/evidence/:index', async (req, res) => {
   if (!match || match.forward.status !== 'sent' || new Date(match.forward.expiresAt).getTime() < Date.now()) return res.status(404).send('This confidential support link is invalid or has expired.');
   const evidence = supportEvidenceFor(match.ticket, req.params.index);
   if (!evidence) return res.status(404).send('Evidence file not found.');
+  return sendSupportEvidence(res, evidence);
+});
+app.get('/secure/support/:token/officer-evidence/:index', async (req, res) => {
+  const match = supportForwardForToken(await readSupportTickets(), req.params.token);
+  if (!match || match.forward.status !== 'sent' || new Date(match.forward.expiresAt).getTime() < Date.now()) return res.status(404).send('This confidential support link is invalid or has expired.');
+  const evidence = supportEvidenceFor(match.ticket, req.params.index, 'officerEvidence');
+  if (!evidence) return res.status(404).send('Officer evidence file not found.');
   return sendSupportEvidence(res, evidence);
 });
 
@@ -3803,6 +3881,44 @@ app.get('/api/staff/me',staffAuth,async(req,res)=>{
   const tickets=await readSupportTickets();
   const supportCount=units.some(unit=>unit.id==='student-support')?tickets.filter(ticket=>!['resolved','closed'].includes(ticket.status)).length:0;
   res.json({ok:true,staff:{name:identity.name||identity.username,username:identity.username,role:identity.role,units,departments:normalizeAdminDepartments(identity.departments),sections:normalizeAdminSections(identity.sections)},metrics:{openSupportTickets:supportCount}});
+});
+function staffReferralTicket(ticket) {
+  return {
+    id: ticket.id, reference: ticket.reference, name: ticket.name, email: ticket.email, type: ticket.type,
+    studyLevel: ticket.studyLevelLabel || '', category: ticket.categoryLabel, priority: ticket.priorityLabel,
+    status: ticket.status, statusLabel: SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,
+    ownerUnit: ticket.ownerUnit, subject: ticket.subject, description: ticket.description, studyCentre: ticket.studyCentre,
+    lastUpdatedAt: ticket.lastUpdatedAt, evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [],
+    officerEvidence: Array.isArray(ticket.officerEvidence) ? ticket.officerEvidence : [], referrals: ticket.referrals || [],
+    auditTrail: ticket.auditTrail || []
+  };
+}
+app.get('/api/staff/referrals', staffAuth, async(req, res) => {
+  const unitIds = normalizeStaffUnits(req.staffIdentity?.units);
+  const tickets = await readSupportTickets();
+  const referrals = tickets.filter(ticket => (ticket.referrals || []).some(referral => unitIds.includes(referral.targetUnit)))
+    .sort((a,b) => String(b.lastUpdatedAt || b.createdAt).localeCompare(String(a.lastUpdatedAt || a.createdAt)))
+    .map(staffReferralTicket);
+  res.json({ ok: true, referrals });
+});
+app.get('/api/staff/referrals/:id/:collection/:index', staffAuth, async(req, res) => {
+  const collection = req.params.collection === 'officer-evidence' ? 'officerEvidence' : req.params.collection === 'evidence' ? 'evidence' : '';
+  if (!collection) return res.status(404).json({ error: 'Evidence file not found.' });
+  const unitIds = normalizeStaffUnits(req.staffIdentity?.units);
+  const ticket = (await readSupportTickets()).find(item => item.id === req.params.id && (item.referrals || []).some(referral => unitIds.includes(referral.targetUnit)));
+  if (!ticket) return res.status(404).json({ error: 'Referred case not found.' });
+  const evidence = supportEvidenceFor(ticket, req.params.index, collection);
+  if (!evidence) return res.status(404).json({ error: 'Evidence file not found.' });
+  return sendSupportEvidence(res, evidence);
+});
+app.post('/api/staff/referrals/:id/reassign', staffAuth, async(req, res) => {
+  if ((ROLE_RANK[req.staffIdentity?.role] || 0) < ROLE_RANK.officer) return res.status(403).json({ error: 'Your staff role is read-only. An officer or administrator must reassign a case.' });
+  const targetUnit = String(req.body?.targetUnit || '').trim();
+  const note = String(req.body?.note || '').trim().slice(0, 2000);
+  if (!Object.prototype.hasOwnProperty.call(STAFF_UNITS, targetUnit)) return res.status(400).json({ error: 'Select the receiving functional unit.' });
+  if (!note) return res.status(400).json({ error: 'Provide reassignment comments for the receiving unit.' });
+  const result = await reassignSupportReferral(req.params.id, { targetUnit, note, actor: req.staffIdentity?.name || req.staffIdentity?.username || 'Functional-unit officer', sourceUnits: req.staffIdentity?.units || [] });
+  return reassignSupportReferralResponse(result, res, req);
 });
 
 // Public admin chooser. Department data remain protected behind department-specific credentials.
