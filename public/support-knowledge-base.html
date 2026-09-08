@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Search CoDE Student Support guidance and frequently requested services">
+  <title>Student Support Knowledge Base | CoDE Academic Services</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="knowledge-page">
+  <header class="topbar"><div class="brand"><img src="/ucc-logo.png" alt="University of Cape Coast logo"><div><h1>CoDE Academic Services</h1><small>Student Support Knowledge Base</small></div></div><nav class="service-nav" aria-label="Main navigation"><a href="/">Home</a><a href="/student-support.html">Submit or track a ticket</a><a href="/staff-login.html">Staff login</a></nav></header>
+  <main class="support-shell knowledge-shell">
+    <section class="knowledge-intro"><div><span class="eyebrow">Find an answer first</span><h2 id="knowledgeHeading">Knowledge base and frequently requested services</h2><p id="knowledgeIntro">Search for the service you need, prepare the required information and open a preselected request form when further action is needed.</p></div><label class="language-picker"><span>Assistance language</span><select id="knowledgeLanguage"><option value="en">English</option><option value="tw">Twi</option><option value="fr">French</option></select></label></section>
+    <section class="knowledge-search" aria-label="Knowledge base search"><label><span id="searchLabel">What do you need help with?</span><input id="knowledgeSearch" type="search" placeholder="Search results, fees, transcript, centre change…"></label><label><span id="categoryLabel">Category</span><select id="knowledgeCategory"><option value="">All services</option><option value="popular">Frequently requested</option><option value="academic">Academic records</option><option value="finance">Fees and payments</option><option value="student-services">Student services</option><option value="confidential">Confidential support</option></select></label></section>
+    <div id="languageNotice" class="notice-banner"><strong>Language assistance</strong><span>Guidance is available in English, Twi and French. Official case records and decisions remain in English.</span></div>
+    <section><div class="section-intro"><h2 id="servicesHeading">Service guides</h2><p id="resultSummary" aria-live="polite"></p></div><div id="knowledgeList" class="knowledge-grid"></div></section>
+    <section class="faq-section"><div class="section-intro"><h2 id="faqHeading">Frequently asked questions</h2></div><div id="faqList" class="faq-list"></div></section>
+  </main>
+  <footer>CoDE Academic Services · Student Support Services · University of Cape Coast</footer>
+  <script src="/support-knowledge-base.js"></script>
+</body>
+</html>

@@ -5,6 +5,7 @@
   const roleLabels = { viewer:'Viewer · read-only', officer:'Officer · operational actions', administrator:'Administrator · full assigned-unit control' };
   let currentStaff = null;
   let referrals = [];
+  let reportOptionsLoaded = false;
 
   function show(text, ok) {
     const element = document.getElementById('staffMessage');
@@ -28,7 +29,7 @@
   }
   function hours(value) { return value === null || value === undefined ? '—' : `${esc(value)}h`; }
   function dashboard(item) {
-    const metrics = [['Total',item.total],['Open',item.open],['Resolved',item.resolved],['Overdue',item.overdue],['At risk',item.atRisk],['Awaiting evidence',item.awaitingEvidence],['SLA compliance',item.slaCompliancePercent === null ? '—' : `${item.slaCompliancePercent}%`],['Satisfaction',item.averageSatisfaction === null ? '—' : `${item.averageSatisfaction}/5`],['Feedback',item.feedbackResponses],['Low ratings',item.lowRatings],['Reopened',item.reopened],['Appealed',item.appealed],['First response',hours(item.averageFirstResponseHours)],['Resolution',hours(item.averageResolutionHours)]];
+    const metrics = [['Total',item.total],['Open',item.open],['Resolved',item.resolved],['Overdue',item.overdue],['At risk',item.atRisk],['Awaiting evidence',item.awaitingEvidence],['SLA compliance',item.slaCompliancePercent === null ? '—' : `${item.slaCompliancePercent}%`],['Satisfaction',item.averageSatisfaction === null ? '—' : `${item.averageSatisfaction}/5`],['Ease',item.averageEaseOfUse === null ? '—' : `${item.averageEaseOfUse}/5`],['Communication',item.averageCommunication === null ? '—' : `${item.averageCommunication}/5`],['Timeliness',item.averageTimeliness === null ? '—' : `${item.averageTimeliness}/5`],['Courtesy',item.averageStaffCourtesy === null ? '—' : `${item.averageStaffCourtesy}/5`],['Feedback',item.feedbackResponses],['Low ratings',item.lowRatings],['Reopened',item.reopened],['Appealed',item.appealed],['First response',hours(item.averageFirstResponseHours)],['Resolution',hours(item.averageResolutionHours)]];
     return `<article class="dashboard-card"><h3>${esc(item.label)}</h3><div class="dashboard-metrics">${metrics.map(([label, value]) => `<span><strong>${value}</strong>${label}</span>`).join('')}</div><div class="dashboard-columns"><section><h4>By category</h4>${breakdown(item.categoryBreakdown)}</section><section><h4>By status</h4>${breakdown(item.statusBreakdown)}</section><section><h4>By study centre</h4>${breakdown(item.centreBreakdown)}</section></div></article>`;
   }
   function evidence(ticket, files, collection) {
@@ -59,7 +60,7 @@
     const actionOptions = monitoringOnly ? '<option value="internal-note">Internal monitoring note</option>' : '<option value="accept">Accept assignment</option><option value="progress">Investigation update</option><option value="request-evidence">Request evidence from student</option><option value="resolve">Propose resolution</option><option value="final-decision">Issue final decision</option><option value="return-to-support">Return to Student Support</option><option value="internal-note">Internal note only</option>';
     const sensitive = ticket.sensitive ? '<span class="confidential-badge">Restricted</span>' : '';
     return `<details class="admin-ticket staff-referral-card" data-id="${esc(ticket.id)}"><summary class="admin-ticket-summary"><span><span class="ticket-ref">${esc(ticket.reference)}</span><strong>${esc(ticket.subject)}</strong><small>${esc(ticket.name)} · ${esc(ticket.category)} · ${esc(ticket.ownerUnit)}</small></span><span class="ticket-summary-badges">${sensitive}${slaBadge(ticket)}<span class="ticket-priority">${esc(ticket.priority)}</span></span></summary><div class="ticket-body">
-      <div class="admin-ticket-meta"><span><strong>Status</strong>${esc(ticket.statusLabel)}</span><span><strong>Student</strong>${esc(ticket.email)}</span><span><strong>Study centre</strong>${esc(ticket.studyCentre || 'Not stated')}</span><span><strong>Assigned officer</strong>${esc(ticket.assignedCaseOwner || 'Unassigned')}</span><span><strong>Resolution target</strong>${esc(date(ticket.dueAt))}</span></div>
+      <div class="admin-ticket-meta"><span><strong>Status</strong>${esc(ticket.statusLabel)}</span><span><strong>Student</strong>${esc(ticket.email)}</span><span><strong>Study centre</strong>${esc(ticket.studyCentre || 'Not stated')}</span><span><strong>Assigned officer</strong>${esc(ticket.assignedCaseOwner || 'Unassigned')}</span><span><strong>Resolution target</strong>${esc(date(ticket.dueAt))}</span><span><strong>Survey</strong>${ticket.feedback?`${esc(ticket.feedback.rating)}/5 overall`:'Not submitted'}</span><span><strong>Assistance language</strong>${esc(({en:'English',tw:'Twi',fr:'French'})[ticket.language]||'English')}</span><span><strong>Notifications</strong>${esc(({'email':'Email only','email-sms':'Email and SMS','email-whatsapp':'Email and WhatsApp'})[ticket.notificationPreference]||'Email only')}</span></div>
       <p class="admin-ticket-description">${esc(ticket.description)}</p>
       <div class="ticket-two-column"><section class="evidence-panel"><h4>Student evidence</h4>${evidence(ticket, ticket.evidence, 'evidence')}</section><section class="evidence-panel"><h4>Officer evidence</h4>${evidence(ticket, ticket.officerEvidence, 'officer-evidence')}${canEdit ? `<form class="officer-evidence-form" enctype="multipart/form-data"><label>Files<input name="evidenceFiles" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.webp,.txt"></label><label>Evidence note<input name="note" placeholder="Source and relevance"></label><button class="btn secondary" type="submit">Attach</button></form>` : ''}</section></div>
       ${canEdit ? `<section class="case-update-panel"><h4>${monitoringOnly ? 'Monitoring note' : 'Receiving-unit action'}</h4><p>${monitoringOnly ? 'This role may attach centre evidence, add internal monitoring notes, and escalate through reassignment; it cannot issue operational decisions.' : 'Accept the assignment, record progress, request student evidence, issue a resolution, or return the case to Student Support.'}</p><div class="case-controls"><label>Action<select class="staff-action">${actionOptions}</select></label><label>Assigned officer<input class="staff-assignee" value="${esc(ticket.assignedCaseOwner || staff.name)}"></label><label class="wide">Case note<textarea class="staff-note" placeholder="Required. Explain the action, evidence needed, progress, or decision."></textarea></label><button class="btn staff-update" type="button">Record action</button></div></section>` : `<p class="staff-restricted">${staff.role === 'viewer' ? 'Your viewer role is read-only.' : 'This referral has reached a decision or closed state.'}</p>`}
@@ -76,23 +77,58 @@
     list.querySelectorAll('.staff-reassign').forEach(button => button.addEventListener('click', reassign));
     list.querySelectorAll('.officer-evidence-form').forEach(form => form.addEventListener('submit', uploadEvidence));
   }
+  function reportQueryString() {
+    const parameters = new URLSearchParams();
+    const form = document.getElementById('reportFilters');
+    new FormData(form).forEach((value, key) => { if (String(value).trim()) parameters.set(key, String(value).trim()); });
+    return parameters.toString();
+  }
+  function optionMarkup(items, selected='') { return (items || []).map(item => `<option value="${esc(item.id ?? item)}" ${String(item.id ?? item) === selected ? 'selected' : ''}>${esc(item.label ?? item)}</option>`).join(''); }
+  function performanceTable(rows) {
+    if (!rows?.length) return '<p class="admin-ticket-empty">No cases match the selected period and filters.</p>';
+    return `<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>Area</th><th>Total</th><th>Open</th><th>Resolved</th><th>Overdue</th><th>SLA</th><th>Rating</th><th>Resolution</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.label)}</td><td>${esc(row.total)}</td><td>${esc(row.open)}</td><td>${esc(row.resolved)}</td><td>${esc(row.overdue)}</td><td>${row.slaCompliance===null?'—':`${esc(row.slaCompliance)}%`}</td><td>${row.satisfaction===null?'—':`${esc(row.satisfaction)}/5`}</td><td>${row.averageResolutionHours===null?'—':`${esc(row.averageResolutionHours)}h`}</td></tr>`).join('')}</tbody></table></div>`;
+  }
+  function renderPerformance(data) {
+    const item=data.summary || {};
+    const metrics=[['Cases',item.total??0],['Complaints',item.complaints??0],['Requests',item.requests??0],['Open',item.open??0],['Resolved',item.resolved??0],['Overdue',item.overdue??0],['SLA compliance',item.slaCompliance===null?'—':`${item.slaCompliance}%`],['Survey response',item.feedbackRate===null?'—':`${item.feedbackRate}%`],['Satisfaction',item.satisfaction===null?'—':`${item.satisfaction}/5`]];
+    document.getElementById('performanceSummary').innerHTML=metrics.map(([label,value])=>`<span><strong>${esc(value)}</strong>${esc(label)}</span>`).join('');
+    document.getElementById('centrePerformance').innerHTML=performanceTable(data.byCentre);
+    document.getElementById('unitPerformance').innerHTML=performanceTable(data.byUnit);
+  }
+  async function loadReport() {
+    const query=reportQueryString();
+    const suffix=query?`?${query}`:'';
+    const [dashboardResponse,performanceResponse]=await Promise.all([fetch(`/api/staff/dashboard${suffix}`),fetch(`/api/staff/support-performance${suffix}`)]);
+    const dashboardData=await dashboardResponse.json().catch(()=>({}));
+    const performanceData=await performanceResponse.json().catch(()=>({}));
+    if(!dashboardResponse.ok||!performanceResponse.ok) throw new Error(dashboardData.error||performanceData.error||'Could not load the service report.');
+    const dashboards=dashboardData.dashboards||[];
+    document.getElementById('leadershipDashboards').hidden=!dashboards.length;
+    document.getElementById('dashboardList').innerHTML=dashboards.map(dashboard).join('');
+    renderPerformance(performanceData);
+  }
   async function load() {
     try {
-      const [meResponse, referralResponse, dashboardResponse] = await Promise.all([fetch('/api/staff/me'), fetch('/api/staff/referrals'), fetch('/api/staff/dashboard')]);
+      const [meResponse, referralResponse, optionsResponse] = await Promise.all([fetch('/api/staff/me'), fetch('/api/staff/referrals'), fetch('/api/staff/support-report-options')]);
       const meData = await meResponse.json().catch(() => ({}));
       const referralData = await referralResponse.json().catch(() => ({}));
-      const dashboardData = await dashboardResponse.json().catch(() => ({}));
-      if (!meResponse.ok || !referralResponse.ok || !dashboardResponse.ok) throw new Error(meData.error || referralData.error || dashboardData.error || 'Could not load the staff workspace.');
+      const optionsData = await optionsResponse.json().catch(() => ({}));
+      if (!meResponse.ok || !referralResponse.ok || !optionsResponse.ok) throw new Error(meData.error || referralData.error || optionsData.error || 'Could not load the staff workspace.');
       currentStaff = meData.staff;
       referrals = referralData.referrals || [];
       document.getElementById('welcome').textContent = `Welcome, ${currentStaff.name}`;
       document.getElementById('accessSummary').textContent = `${roleLabels[currentStaff.role] || currentStaff.role}. ${currentStaff.units.length} assigned functional unit${currentStaff.units.length === 1 ? '' : 's'}.`;
       document.getElementById('staffMetrics').innerHTML = `<article class="staff-metric"><span>Shared referrals visible</span><strong>${referrals.length}</strong></article>${currentStaff.units.some(unit => unit.id === 'student-support') ? `<article class="staff-metric"><span>Open Student Support cases</span><strong>${esc(meData.metrics.openSupportTickets)}</strong></article>` : ''}`;
-      const dashboards = dashboardData.dashboards || [];
-      document.getElementById('leadershipDashboards').hidden = !dashboards.length;
-      document.getElementById('dashboardList').innerHTML = dashboards.map(dashboard).join('');
+      if (!reportOptionsLoaded) {
+        document.getElementById('reportCentre').insertAdjacentHTML('beforeend',optionMarkup(optionsData.centres));
+        document.getElementById('reportUnit').insertAdjacentHTML('beforeend',optionMarkup(optionsData.units));
+        document.getElementById('reportStatus').insertAdjacentHTML('beforeend',optionMarkup(optionsData.statuses));
+        document.getElementById('reportCategory').insertAdjacentHTML('beforeend',optionMarkup(optionsData.categories));
+        reportOptionsLoaded=true;
+      }
       document.getElementById('unitCards').innerHTML = currentStaff.units.map(unit => unitCard(unit, currentStaff)).join('') || '<div class="resource-section">No functional-unit access is assigned.</div>';
       renderReferrals();
+      await loadReport();
     } catch (error) { show(error.message, false); }
   }
   async function updateCase(event) {
@@ -133,5 +169,10 @@
     } catch (error) { show(error.message, false); event.currentTarget.disabled = false; }
   }
   document.getElementById('referralSearch').addEventListener('input', renderReferrals);
+  document.getElementById('reportFilters').addEventListener('submit', async event => { event.preventDefault(); try { await loadReport(); show('Report filters applied.',true); } catch(error) { show(error.message,false); } });
+  document.getElementById('clearReportFilters').addEventListener('click', async () => { document.getElementById('reportFilters').reset(); try { await loadReport(); } catch(error) { show(error.message,false); } });
+  document.getElementById('downloadRegisterExcel').addEventListener('click',()=>{ const query=reportQueryString(); window.location.href=`/api/staff/support-register.xlsx${query?`?${query}`:''}`; });
+  document.getElementById('downloadRegisterCsv').addEventListener('click',()=>{ const query=reportQueryString(); window.location.href=`/api/staff/support-register.csv${query?`?${query}`:''}`; });
+  document.getElementById('downloadPerformance').addEventListener('click',()=>{ const query=reportQueryString(); window.location.href=`/api/staff/support-performance.xlsx${query?`?${query}`:''}`; });
   load();
 })();
