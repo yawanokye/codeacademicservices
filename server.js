@@ -5,12 +5,21 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
+const { DatabaseSync } = require('node:sqlite');
 const mammoth = require('mammoth');
 const WordExtractor = require('word-extractor');
 const { CanvasFactory } = require('pdf-parse/worker');
 const { PDFParse } = require('pdf-parse');
 
 const app = express();
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
 
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -148,6 +157,7 @@ const STUDY_CENTRES_FILE = path.join(DATA_DIR, 'study-centres.json');
 const STUDY_CENTRE_DIRECTORY_FILE = path.join(DATA_DIR, 'study-centre-directory.json');
 const PORTAL_SETTINGS_FILE = path.join(DATA_DIR, 'portal-settings.json');
 const SUPPORT_TICKETS_FILE = path.join(DATA_DIR, 'support-tickets.json');
+const SUPPORT_DB_FILE = path.resolve(String(process.env.SUPPORT_DB_FILE || path.join(DATA_DIR, 'support-tickets.sqlite')));
 const DEFAULT_STUDY_CENTRE_DIRECTORY_PATH = path.join(__dirname, 'defaults', 'study-centre-directory.json');
 const RESOURCES_DIR = path.join(STORAGE_DIR, 'resources');
 const GMAIL_CLIENT_ID = String(process.env.GMAIL_CLIENT_ID || '').trim();
@@ -163,6 +173,10 @@ const STUDENT_FEEDBACK_EXPIRY_DAYS = Math.min(90, Math.max(1, Number(process.env
 const ADMIN_INVITATION_EXPIRY_HOURS = Math.min(168, Math.max(1, Number(process.env.ADMIN_INVITATION_EXPIRY_HOURS || 24) || 24));
 const PROJECT_HIGH_ROW_WARNING = Math.max(1, Number(process.env.PROJECT_HIGH_ROW_WARNING || 100) || 100);
 const SUPPORT_FORWARD_EXPIRY_DAYS = Math.min(60, Math.max(1, Number(process.env.SUPPORT_FORWARD_EXPIRY_DAYS || 14) || 14));
+const SUPPORT_STATUS_TOKEN_SECRET = String(process.env.SUPPORT_STATUS_TOKEN_SECRET || DEVELOPER_ADMIN_PASSWORD).trim();
+const SUPPORT_ALLOWED_EMAIL_DOMAINS = new Set(String(process.env.SUPPORT_ALLOWED_EMAIL_DOMAINS || 'ucc.edu.gh').split(',').map(v => v.trim().toLowerCase()).filter(Boolean));
+const SUPPORT_HOLIDAYS = new Set(String(process.env.SUPPORT_HOLIDAYS || '').split(',').map(v => v.trim()).filter(v => /^\d{4}-\d{2}-\d{2}$/.test(v)));
+const SUPPORT_EVIDENCE_REMINDER_WORKING_DAYS = Math.min(10, Math.max(1, Number(process.env.SUPPORT_EVIDENCE_REMINDER_WORKING_DAYS || 3) || 3));
 
 const DEPARTMENTS = {
   'education': {
@@ -194,6 +208,7 @@ const ADMIN_ROLES = new Set(['viewer','officer','administrator']);
 const ROLE_RANK = { viewer:1, officer:2, administrator:3 };
 const STAFF_UNITS = Object.freeze({
   'student-support': { label: 'Student Support Services Unit', summary: 'Triage complaints and service requests, communicate with students, and forward matters with comments.' },
+  'confidential-handler': { label: 'Confidential Case Handler', summary: 'Restricted handling of sensitive complaints, protected evidence and authorised escalations.' },
   'general-office': { label: 'General Office', summary: 'Receive transcript requests and general administrative service matters.' },
   'student-records': { label: 'Student Records Management Unit', summary: 'Receive and process assigned records matters. Official records remain controlled through approved UCC systems.' },
   'college-registrar': { label: 'College Registrar', summary: 'Handle registrar matters, certificates, name changes and escalated service requests.' },
@@ -371,7 +386,57 @@ const FIELD_SCORE_REPORTS = Object.freeze({
 });
 const FIELD_SCORE_REPORT_KEYS = Object.keys(FIELD_SCORE_REPORTS);
 
-for (const dir of [STORAGE_DIR, DATA_DIR, FILES_DIR, RESOURCES_DIR]) fs.mkdirSync(dir, { recursive: true });
+let supportDatabase = null;
+function initSupportDatabase() {
+  fs.mkdirSync(path.dirname(SUPPORT_DB_FILE), { recursive: true });
+  supportDatabase = new DatabaseSync(SUPPORT_DB_FILE);
+  supportDatabase.exec('PRAGMA journal_mode = WAL');
+  supportDatabase.exec('PRAGMA busy_timeout = 5000');
+  supportDatabase.exec(`CREATE TABLE IF NOT EXISTS support_tickets (
+    id TEXT PRIMARY KEY,
+    reference TEXT NOT NULL UNIQUE,
+    student_email TEXT NOT NULL,
+    status TEXT NOT NULL,
+    category_key TEXT NOT NULL,
+    owner_unit TEXT NOT NULL,
+    sensitive INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    last_updated_at TEXT NOT NULL,
+    due_at TEXT,
+    data_json TEXT NOT NULL
+  )`);
+  supportDatabase.exec('CREATE INDEX IF NOT EXISTS idx_support_email ON support_tickets(student_email)');
+  supportDatabase.exec('CREATE INDEX IF NOT EXISTS idx_support_queue ON support_tickets(status, category_key, owner_unit, sensitive, due_at)');
+  const existing = Number(supportDatabase.prepare('SELECT COUNT(*) AS count FROM support_tickets').get()?.count || 0);
+  if (!existing && fs.existsSync(SUPPORT_TICKETS_FILE)) {
+    try {
+      const legacy = JSON.parse(fs.readFileSync(SUPPORT_TICKETS_FILE, 'utf8') || '[]');
+      if (Array.isArray(legacy) && legacy.length) persistSupportTickets(legacy);
+    } catch (error) {
+      console.error('Legacy support-ticket migration failed:', error.message);
+    }
+  }
+}
+function persistSupportTickets(tickets) {
+  const insert = supportDatabase.prepare(`INSERT INTO support_tickets
+    (id, reference, student_email, status, category_key, owner_unit, sensitive, created_at, last_updated_at, due_at, data_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  supportDatabase.exec('BEGIN IMMEDIATE');
+  try {
+    supportDatabase.exec('DELETE FROM support_tickets');
+    for (const ticket of tickets) insert.run(
+      ticket.id, ticket.reference, ticket.email || '', ticket.status || 'received', ticket.categoryKey || 'general',
+      ticket.ownerUnit || 'Student Support Services Unit', ticket.sensitive ? 1 : 0, ticket.createdAt || new Date().toISOString(),
+      ticket.lastUpdatedAt || ticket.createdAt || new Date().toISOString(), ticket.dueAt || null, JSON.stringify(ticket)
+    );
+    supportDatabase.exec('COMMIT');
+  } catch (error) {
+    supportDatabase.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+for (const dir of [STORAGE_DIR, DATA_DIR, FILES_DIR, RESOURCES_DIR, path.dirname(SUPPORT_DB_FILE)]) fs.mkdirSync(dir, { recursive: true });
 if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '[]', 'utf8');
 if (!fs.existsSync(ASSIGNMENTS_FILE)) fs.writeFileSync(ASSIGNMENTS_FILE, '[]', 'utf8');
 if (!fs.existsSync(RESOURCES_FILE)) fs.writeFileSync(RESOURCES_FILE, '[]', 'utf8');
@@ -383,6 +448,7 @@ if (!fs.existsSync(STUDY_CENTRE_DIRECTORY_FILE)) {
 }
 if (!fs.existsSync(PORTAL_SETTINGS_FILE)) fs.writeFileSync(PORTAL_SETTINGS_FILE, JSON.stringify({version:1,fieldExperienceClaimFormRequired:false}, null, 2), 'utf8');
 if (!fs.existsSync(SUPPORT_TICKETS_FILE)) fs.writeFileSync(SUPPORT_TICKETS_FILE, '[]', 'utf8');
+initSupportDatabase();
 
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
@@ -641,10 +707,19 @@ async function supportWorkspaceAuth(req, res, next) {
   }
   return staffAuth(req,res,()=>{
     const identity=req.staffIdentity||{};
-    if(!normalizeStaffUnits(identity.units).includes('student-support')) return res.status(403).json({error:'Student Support Services access is required.'});
+    const units=normalizeStaffUnits(identity.units);
+    if(!units.includes('student-support')&&!units.includes('confidential-handler')) return res.status(403).json({error:'Student Support Services or Confidential Case Handler access is required.'});
     req.supportIdentity=identity;
     next();
   });
+}
+function canAccessSensitiveSupport(identity) {
+  if (identity?.developer) return true;
+  const units = normalizeStaffUnits(identity?.units);
+  return units.includes('confidential-handler') || units.includes('provost');
+}
+function canAccessSupportTicket(identity, ticket) {
+  return !ticket?.sensitive || canAccessSensitiveSupport(identity);
 }
 function requireSupportRole(minimumRole='viewer') {
   return (req,res,next) => (ROLE_RANK[req.supportIdentity?.role]||0)>=(ROLE_RANK[minimumRole]||1)
@@ -703,9 +778,7 @@ function mutateDb(mutator) {
 
 async function readSupportTickets() {
   try {
-    const raw = await fsp.readFile(SUPPORT_TICKETS_FILE, 'utf8');
-    const parsed = JSON.parse(raw || '[]');
-    return Array.isArray(parsed) ? parsed : [];
+    return supportDatabase.prepare('SELECT data_json FROM support_tickets ORDER BY created_at DESC').all().map(row => JSON.parse(row.data_json));
   } catch {
     return [];
   }
@@ -716,6 +789,7 @@ function mutateSupportTickets(mutator) {
   supportTicketWriteQueue = supportTicketWriteQueue.catch(() => {}).then(async () => {
     const tickets = await readSupportTickets();
     const result = await mutator(tickets);
+    persistSupportTickets(tickets);
     const temp = SUPPORT_TICKETS_FILE + '.tmp';
     await fsp.writeFile(temp, JSON.stringify(tickets, null, 2), 'utf8');
     await fsp.rename(temp, SUPPORT_TICKETS_FILE);
@@ -1048,7 +1122,7 @@ async function extractDissertationText(file) {
   throw new Error('Dissertation title validation supports PDF, DOC and DOCX files only.');
 }
 
-async function sendInlineClaimPreview(res, item) {
+async function sendInlineClaimPreview(res, item, previewTitle = 'Claim Form Preview') {
   if(!item?.storedName) return res.status(404).send('Claim form is unavailable.');
   const fp=path.join(FILES_DIR,path.basename(item.storedName));
   if(!fs.existsSync(fp)) return res.status(404).send('Claim form file is unavailable.');
@@ -1075,7 +1149,8 @@ async function sendInlineClaimPreview(res, item) {
       body=`<p>This file type cannot be rendered inline. <a href="#" onclick="history.back();return false">Return</a> and use Download.</p>`;
     }
   }catch(e){console.error('Claim preview conversion failed:',e);body=`<p>The claim form could not be rendered inline. Use the Download action to inspect the original file.</p>`;}
-  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Claim Form Preview</title><style>body{font-family:Arial,sans-serif;margin:0;padding:22px;color:#172431;background:#fff}table{border-collapse:collapse;max-width:100%}td,th{border:1px solid #cbd5df;padding:6px 8px}img{max-width:100%;height:auto}pre{white-space:pre-wrap;font-family:Arial,sans-serif;line-height:1.5}.preview-head{position:sticky;top:0;background:#fff;border-bottom:1px solid #dce3ea;padding:0 0 12px;margin-bottom:18px}.preview-head strong{color:#082b4c}</style></head><body><div class="preview-head"><strong>Claim Form Preview</strong><br><small>${htmlEscape(item.originalName||'Claim form')}</small></div>${body}</body></html>`);
+  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'self'");
+  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${htmlEscape(previewTitle)}</title><style>body{font-family:Arial,sans-serif;margin:0;padding:22px;color:#172431;background:#fff}table{border-collapse:collapse;max-width:100%}td,th{border:1px solid #cbd5df;padding:6px 8px}img{max-width:100%;height:auto}pre{white-space:pre-wrap;font-family:Arial,sans-serif;line-height:1.5}.preview-head{position:sticky;top:0;background:#fff;border-bottom:1px solid #dce3ea;padding:0 0 12px;margin-bottom:18px}.preview-head strong{color:#082b4c}</style></head><body><div class="preview-head"><strong>${htmlEscape(previewTitle)}</strong><br><small>${htmlEscape(item.originalName||'Document')}</small></div>${body}</body></html>`);
 }
 
 async function uploadedFileContainsReviewerIdentity(file, reviewerName='', reviewerEmail='') {
@@ -1765,11 +1840,24 @@ const SUPPORT_CATEGORIES = Object.freeze({
   'general': { label: 'General or unclassified complaint', owner: 'Student Support Services', support: 'Responsible unit after screening', days: 10 },
   'sensitive': { label: 'Sensitive complaint', owner: 'Confidential Handler', support: 'Provost or designated authority', days: 2 }
 });
+const SUPPORT_CATEGORY_GUIDANCE = Object.freeze({
+  'incomplete-result': { evidence: 'Result slip, course code, academic year, semester and earlier correspondence.', before: 'Confirm the course code and check that the published correction period has passed.' },
+  'fees-payment': { evidence: 'Payment receipt, transaction reference, date, amount and student-account screenshot.', before: 'Check that the transaction reference and amount match the student account.' },
+  certificate: { evidence: 'Completion details, graduation year and earlier certificate correspondence.', before: 'Confirm the programme name, completion year and collection or delivery method.' },
+  'change-of-name': { evidence: 'Approved identity documents and the formal name-change record.', before: 'Use the exact current and requested names and prepare the authorised supporting record.' },
+  transcript: { evidence: 'Application receipt, payment reference, application date and intended destination.', before: 'Confirm the destination address and whether the request is electronic or physical.' },
+  'change-study-centre': { evidence: 'Current centre, proposed centre and reason for the request.', before: 'Confirm both centre names and the semester from which the change should apply.' },
+  'centre-transit': { evidence: 'Current centre, temporary centre, dates and coordinator confirmation.', before: 'Confirm the start and end dates of the temporary transit.' },
+  'programme-department': { evidence: 'Programme, course details and relevant departmental correspondence.', before: 'Identify the programme, department and specific academic action required.' },
+  'assessment-project': { evidence: 'Course code, assessment or project details, dates and relevant correspondence.', before: 'Identify the assessment, academic period and responsible department.' },
+  sensitive: { evidence: 'Only evidence necessary for the confidential handler. Never include passwords or payment-card details.', before: 'Use a private device where possible and avoid naming unrelated people.' },
+  general: { evidence: 'Receipts, screenshots, messages, incident references or instructions that explain the matter.', before: 'Search existing open tickets and use the closest category if one applies.' }
+});
 const SUPPORT_PRIORITIES = Object.freeze({
-  low: { label: 'Low', hours: 240 },
-  normal: { label: 'Normal', hours: 240 },
-  high: { label: 'High', hours: 120 },
-  urgent: { label: 'Urgent', hours: 48 }
+  low: { label: 'Low' },
+  normal: { label: 'Normal' },
+  high: { label: 'High' },
+  urgent: { label: 'Urgent' }
 });
 const SUPPORT_STUDY_LEVELS = Object.freeze({
   undergraduate: 'Undergraduate',
@@ -1780,12 +1868,106 @@ const SUPPORT_STUDY_LEVELS = Object.freeze({
 
 function supportReference() { return makeReference('CAS'); }
 function supportDateFromHours(hours) { return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString(); }
+function supportDateKey(value) { return new Date(value).toISOString().slice(0, 10); }
+function supportIsWorkingDay(value) {
+  const date = new Date(value);
+  const day = date.getUTCDay();
+  return day !== 0 && day !== 6 && !SUPPORT_HOLIDAYS.has(supportDateKey(date));
+}
+function supportMoveWorkingDays(value, count) {
+  const date = new Date(value);
+  const direction = count < 0 ? -1 : 1;
+  let remaining = Math.abs(Number(count) || 0);
+  while (remaining > 0) {
+    date.setUTCDate(date.getUTCDate() + direction);
+    if (supportIsWorkingDay(date)) remaining -= 1;
+  }
+  return date.toISOString();
+}
+function supportWorkingDaysBetween(fromValue, toValue) {
+  const cursor = new Date(fromValue);
+  const end = new Date(toValue).getTime();
+  let days = 0;
+  let guard = 0;
+  while (cursor.getTime() < end && guard < 370) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    if (supportIsWorkingDay(cursor)) days += 1;
+    guard += 1;
+  }
+  return Math.max(1, days);
+}
+function supportElapsedWorkingDays(fromValue, toValue = new Date()) {
+  const cursor = new Date(fromValue);
+  const end = new Date(toValue).getTime();
+  let days = 0;
+  let guard = 0;
+  while (cursor.getTime() < end && guard < 370) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    if (cursor.getTime() <= end && supportIsWorkingDay(cursor)) days += 1;
+    guard += 1;
+  }
+  return days;
+}
+function supportDueDays(categoryKey, priorityKey, sensitive = false) {
+  if (sensitive || categoryKey === 'sensitive') return 2;
+  const categoryDays = SUPPORT_CATEGORIES[categoryKey]?.days || 10;
+  if (priorityKey === 'urgent') return Math.min(categoryDays, 2);
+  if (priorityKey === 'high') return Math.min(categoryDays, 5);
+  if (priorityKey === 'low') return categoryDays + 2;
+  return categoryDays;
+}
+function supportSlaSummary(ticket) {
+  const now = Date.now();
+  const due = ticket.dueAt ? new Date(ticket.dueAt).getTime() : 0;
+  const warningAt = due ? new Date(supportMoveWorkingDays(ticket.dueAt, -1)).getTime() : 0;
+  const closed = ['resolved','final-decision','closed','accepted'].includes(ticket.status);
+  return {
+    paused: Boolean(ticket.slaPausedAt),
+    overdue: Boolean(!closed && !ticket.slaPausedAt && due && due < now),
+    atRisk: Boolean(!closed && !ticket.slaPausedAt && due && due >= now && warningAt <= now),
+    firstResponseAt: ticket.firstResponseAt || null,
+    assignmentDueAt: ticket.assignmentDueAt || null,
+    resolutionDueAt: ticket.dueAt || null,
+    pausedAt: ticket.slaPausedAt || null,
+    pauseReason: ticket.slaPauseReason || ''
+  };
+}
+function supportPauseSla(ticket, reason) {
+  if (ticket.slaPausedAt) return;
+  ticket.slaPausedAt = new Date().toISOString();
+  ticket.slaPauseReason = reason || 'Awaiting student information';
+  ticket.slaRemainingDays = ticket.dueAt ? supportWorkingDaysBetween(new Date(), ticket.dueAt) : 1;
+}
+function supportResumeSla(ticket) {
+  if (!ticket.slaPausedAt) return;
+  ticket.dueAt = supportMoveWorkingDays(new Date(), Math.max(1, Number(ticket.slaRemainingDays) || 1));
+  ticket.slaPausedAt = null;
+  ticket.slaPauseReason = '';
+  ticket.slaRemainingDays = null;
+}
+function supportStatusToken(ticket) {
+  const payload = Buffer.from(JSON.stringify({ reference: ticket.reference, email: ticket.email }), 'utf8').toString('base64url');
+  const signature = crypto.createHmac('sha256', SUPPORT_STATUS_TOKEN_SECRET).update(payload).digest('base64url');
+  return `${payload}.${signature}`;
+}
+function supportStatusIdentity(token) {
+  try {
+    const [payload, signature] = String(token || '').split('.');
+    if (!payload || !signature) return null;
+    const expected = crypto.createHmac('sha256', SUPPORT_STATUS_TOKEN_SECRET).update(payload).digest('base64url');
+    if (!safeEqual(signature, expected)) return null;
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return parsed?.reference && parsed?.email ? parsed : null;
+  } catch { return null; }
+}
 function supportPublicTicket(ticket) {
+  const responseDeadline = ticket.studentResponseDueAt ? new Date(ticket.studentResponseDueAt).getTime() : 0;
   return {
     reference: ticket.reference,
     type: ticket.type,
     category: ticket.categoryLabel,
     priority: ticket.priorityLabel,
+    subject: ticket.subject,
     studyLevel: ticket.studyLevelLabel || '',
     status: ticket.status,
     ownerUnit: ticket.ownerUnit,
@@ -1794,9 +1976,16 @@ function supportPublicTicket(ticket) {
     dueAt: ticket.dueAt,
     lastUpdatedAt: ticket.lastUpdatedAt,
     studentResponseDueAt: ticket.studentResponseDueAt || null,
-    resolution: ['resolved','closed','final-decision'].includes(ticket.status) ? ticket.resolution || '' : '',
+    resolution: ['resolved','closed','final-decision','accepted'].includes(ticket.status) ? ticket.resolution || '' : '',
     evidenceCount: Array.isArray(ticket.evidence) ? ticket.evidence.length : 0,
     needsEvidence: ['evidence-requested','lacks-evidence'].includes(ticket.status),
+    canAccept: ['resolved','final-decision'].includes(ticket.status),
+    canReopen: ['resolved','final-decision','closed'].includes(ticket.status) && (!responseDeadline || responseDeadline > Date.now()),
+    canAppeal: ['resolved','final-decision','closed'].includes(ticket.status),
+    canRespond: !['accepted','closed','resolved','final-decision'].includes(ticket.status),
+    canGiveFeedback: ['accepted','closed'].includes(ticket.status) && !ticket.feedback,
+    feedbackSubmitted: Boolean(ticket.feedback),
+    sla: supportSlaSummary(ticket),
     updates: (ticket.studentUpdates || []).slice(-12)
   };
 }
@@ -1815,20 +2004,22 @@ function supportTicketPayload(req) {
   const studyCentre = cleanHumanText(req.body?.studyCentre).slice(0, 180);
   const studentNumber = cleanHumanText(req.body?.studentNumber).slice(0, 100);
   const phone = cleanHumanText(req.body?.phone).slice(0, 40);
+  const programme = cleanHumanText(req.body?.programme).slice(0, 180);
+  const academicDepartment = ['education','business','arts-social-sciences','science-mathematics'].includes(String(req.body?.academicDepartment || '').trim()) ? String(req.body.academicDepartment).trim() : '';
   const studyLevelKey = Object.prototype.hasOwnProperty.call(SUPPORT_STUDY_LEVELS, String(req.body?.studyLevel || '').trim())
     ? String(req.body.studyLevel).trim() : 'other';
   const sensitive = categoryKey === 'sensitive' || String(req.body?.sensitive || '') === 'true';
-  return { type, categoryKey, category, priorityKey, priority, name, email, subject, description, studyCentre, studentNumber, phone, studyLevelKey, studyLevelLabel: SUPPORT_STUDY_LEVELS[studyLevelKey], sensitive };
+  return { type, categoryKey, category, priorityKey, priority, name, email, subject, description, studyCentre, studentNumber, phone, programme, academicDepartment, studyLevelKey, studyLevelLabel: SUPPORT_STUDY_LEVELS[studyLevelKey], sensitive };
 }
 async function sendSupportAcknowledgementEmail(ticket, req) {
   if (!isEmail(ticket.email) || !gmailConfigured()) return;
-  const statusUrl = `${baseUrlFor(req)}/support-track.html?reference=${encodeURIComponent(ticket.reference)}&email=${encodeURIComponent(ticket.email)}`;
+  const statusUrl = `${baseUrlFor(req)}/support-track.html?token=${encodeURIComponent(supportStatusToken(ticket))}`;
   const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">CoDE Academic Services Portal acknowledgement</h2><p>Dear ${htmlEscape(ticket.name || 'Student')},</p><p>Your ${ticket.type === 'service-request' ? 'service request' : 'complaint'} has been received by Student Support Services.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #d4a72c"><strong>Reference:</strong> ${htmlEscape(ticket.reference)}<br><strong>Category:</strong> ${htmlEscape(ticket.categoryLabel)}<br><strong>Responsible unit:</strong> ${htmlEscape(ticket.ownerUnit)}<br><strong>Target response:</strong> ${htmlEscape(new Date(ticket.dueAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'}))} UTC</div><p><a href="${htmlEscape(statusUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Track this ticket</a></p><p>Please quote the reference in any follow-up communication.</p><p>Regards,<br>Student Support Services<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
   await sendGmailHtmlEmail({to: ticket.email, subject: `Support ticket received - ${ticket.reference}`, html});
 }
 async function sendSupportStudentUpdateEmail(ticket, update, req) {
   if (!isEmail(ticket.email) || !gmailConfigured()) return;
-  const statusUrl = `${baseUrlFor(req)}/support-track.html?reference=${encodeURIComponent(ticket.reference)}&email=${encodeURIComponent(ticket.email)}`;
+  const statusUrl = `${baseUrlFor(req)}/support-track.html?token=${encodeURIComponent(supportStatusToken(ticket))}`;
   const final = ['resolved','closed','final-decision'].includes(ticket.status);
   const subject = final ? `Final decision on your support ticket - ${ticket.reference}` : `Update on your support ticket - ${ticket.reference}`;
   const heading = final ? 'Final decision recorded' : 'Your support ticket has been updated';
@@ -1836,32 +2027,90 @@ async function sendSupportStudentUpdateEmail(ticket, update, req) {
   await sendGmailHtmlEmail({to:ticket.email,subject,html});
 }
 
+const supportRateBuckets = new Map();
+function supportRateLimit(limit, windowMs = 60 * 60 * 1000) {
+  return (req, res, next) => {
+    const key = `${req.ip || req.socket?.remoteAddress || 'unknown'}:${req.path.split('/').slice(0, 4).join('/')}`;
+    const now = Date.now();
+    const current = supportRateBuckets.get(key);
+    const bucket = !current || current.resetAt <= now ? { count: 0, resetAt: now + windowMs } : current;
+    bucket.count += 1;
+    supportRateBuckets.set(key, bucket);
+    if (bucket.count > limit) return res.status(429).json({ error: 'Too many requests. Please wait and try again.' });
+    next();
+  };
+}
+function supportSameOrigin(req, res, next) {
+  const origin = String(req.headers.origin || '').trim();
+  if (!origin) return next();
+  try {
+    if (new URL(origin).host === req.get('host')) return next();
+  } catch {}
+  return res.status(403).json({ error: 'This request could not be verified.' });
+}
+function supportTicketCredentials(req, reference) {
+  const tokenIdentity = supportStatusIdentity(req.body?.accessToken || req.query?.token);
+  if (tokenIdentity && tokenIdentity.reference.toUpperCase() === String(reference || '').toUpperCase()) return tokenIdentity;
+  const email = String(req.body?.email || req.query?.email || '').trim().toLowerCase();
+  return isEmail(email) ? { reference, email } : null;
+}
+
 // 1A. STUDENT SUPPORT SERVICES AND CENTRE COORDINATOR TICKETS
-app.post('/api/support/tickets', supportUpload.array('evidenceFiles', 10), async (req, res) => {
+app.use('/api/support/tickets', supportSameOrigin);
+app.get('/api/support/config', async (_req, res) => {
+  const directory = (await readStudyCentreDirectory()).filter(centre => centre.enabled !== false).map(centre => centre.name).filter(Boolean).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'}));
+  const units = Object.entries(STAFF_UNITS).filter(([id]) => !['payroll','auditor'].includes(id)).map(([id, unit]) => ({ id, label: unit.label }));
+  const categories = Object.entries(SUPPORT_CATEGORIES).map(([id, category]) => ({ id, label: category.label, suggestedUnit: category.suggestedUnit || 'student-support', responsibleUnit: category.owner, workingDays: category.days, evidenceGuidance: SUPPORT_CATEGORY_GUIDANCE[id]?.evidence || SUPPORT_CATEGORY_GUIDANCE.general.evidence, beforeSubmitting: SUPPORT_CATEGORY_GUIDANCE[id]?.before || SUPPORT_CATEGORY_GUIDANCE.general.before }));
+  const departments = Object.entries(DEPARTMENTS).map(([id, department]) => ({ id, label: department.name }));
+  res.json({ ok: true, units, categories, departments, studyCentres: [...new Set(directory)] });
+});
+app.get('/centre-coordinators.html', staffAuth, (req, res) => {
+  const units = normalizeStaffUnits(req.staffIdentity?.units);
+  if (!units.some(unit => ['coordinator','regional-administrator'].includes(unit)) || (ROLE_RANK[req.staffIdentity?.role] || 0) < ROLE_RANK.officer) return res.status(403).send('Centre Coordinator or Regional Administrator officer access is required.');
+  return res.sendFile(path.join(__dirname, 'public', 'centre-coordinators.html'));
+});
+app.post('/api/support/tickets', supportRateLimit(12), supportUpload.array('evidenceFiles', 10), async (req, res) => {
   try {
     const payload = supportTicketPayload(req);
+    if (String(req.body?.website || '').trim()) { await removeUploaded(req).catch(() => {}); return res.status(400).json({ error: 'The submission could not be verified.' }); }
     if (!payload.name || !payload.email || !payload.subject || !payload.description) {
       return res.status(400).json({ error: 'Name, email, subject and description are required.' });
     }
     if (!isEmail(payload.email)) return res.status(400).json({ error: 'Enter a valid email address.' });
     if (payload.description.length < 20) return res.status(400).json({ error: 'Please provide at least 20 characters describing the matter.' });
     const now = new Date().toISOString();
+    const duplicate = (await readSupportTickets()).find(item =>
+      item.email.toLowerCase() === payload.email.toLowerCase() &&
+      item.categoryKey === (payload.categoryKey || 'general') &&
+      String(item.subject || '').trim().toLowerCase() === payload.subject.trim().toLowerCase() &&
+      !['accepted','closed'].includes(item.status) &&
+      Date.now() - new Date(item.createdAt).getTime() < 7 * 24 * 60 * 60 * 1000
+    );
+    if (duplicate) {
+      await removeUploaded(req).catch(() => {});
+      return res.status(409).json({ error: `This appears to duplicate open ticket ${duplicate.reference}. Track that ticket or reply to it instead.` });
+    }
+    const submittingStaff = staffSessionIdentity(req);
+    const submittingUnits = normalizeStaffUnits(submittingStaff?.units);
+    const assisted = submittingUnits.some(unit => ['coordinator','regional-administrator'].includes(unit));
     const ticket = {
       id: crypto.randomUUID(), reference: supportReference(), type: payload.type,
       categoryKey: payload.categoryKey || 'general', categoryLabel: payload.category.label,
       priorityKey: payload.priorityKey, priorityLabel: payload.priority.label,
       name: payload.name, email: payload.email, phone: payload.phone,
       studentNumber: payload.studentNumber, studyCentre: payload.studyCentre,
+      programme: payload.programme, academicDepartment: payload.academicDepartment,
       studyLevel: payload.studyLevelKey, studyLevelLabel: payload.studyLevelLabel,
       subject: payload.subject, description: payload.description,
       evidence: Array.isArray(req.files) ? req.files.map(fileRecord) : [],
-      sensitive: payload.sensitive, originRole: cleanHumanText(req.body?.originRole).slice(0, 80) || 'student',
-      ownerUnit: 'Student Support Services Unit', intendedUnit: payload.category.owner, supportUnit: 'Student Support Services Unit',
+      sensitive: payload.sensitive, confidentiality: payload.sensitive ? 'restricted' : 'standard', originRole: assisted ? (submittingUnits.includes('coordinator') ? 'centre-coordinator' : 'regional-administrator') : 'student', submittedBy: assisted ? (submittingStaff.name || submittingStaff.username || 'Authorised staff') : payload.name,
+      ownerUnit: payload.sensitive ? STAFF_UNITS['confidential-handler'].label : STAFF_UNITS['student-support'].label,
+      ownerUnitId: payload.sensitive ? 'confidential-handler' : 'student-support', intendedUnit: payload.category.owner, supportUnit: STAFF_UNITS['student-support'].label,
       status: 'received', resolution: '', createdAt: now, acknowledgedAt: now,
-      lastUpdatedAt: now, dueAt: supportDateFromHours(payload.priority.hours),
+      lastUpdatedAt: now, assignmentDueAt: supportMoveWorkingDays(now, 2), dueAt: supportMoveWorkingDays(now, supportDueDays(payload.categoryKey, payload.priorityKey, payload.sensitive)),
       auditTrail: [{ action: 'Ticket received', at: now, by: 'Student Support Services' }],
       studentUpdates: [{ label: 'Ticket received', message: 'Your matter has been received by Student Support Services and is awaiting screening.', at: now }],
-      officerEvidence: [], referrals: [], interUnitMessages: []
+      officerEvidence: [], referrals: payload.sensitive ? [{ id: crypto.randomUUID(), sourceUnit: 'student-support', sourceLabel: STAFF_UNITS['student-support'].label, targetUnit: 'confidential-handler', targetLabel: STAFF_UNITS['confidential-handler'].label, comment: 'Automatically registered in the restricted confidential-case workspace.', status: 'assigned', createdAt: now, reassignmentHistory: [] }] : [], interUnitMessages: []
     };
     await mutateSupportTickets(tickets => { tickets.push(ticket); return ticket; });
     sendSupportAcknowledgementEmail(ticket, req).catch(error => console.error('Support acknowledgement email failed:', error.message));
@@ -1873,7 +2122,22 @@ app.post('/api/support/tickets', supportUpload.array('evidenceFiles', 10), async
   }
 });
 
-app.get('/api/support/tickets/:reference', async (req, res) => {
+app.get('/api/support/tickets/access/:token', supportRateLimit(40), async (req, res) => {
+  const identity = supportStatusIdentity(req.params.token);
+  if (!identity) return res.status(401).json({ error: 'This tracking link is invalid.' });
+  const ticket = (await readSupportTickets()).find(item => item.reference.toUpperCase() === identity.reference.toUpperCase() && item.email.toLowerCase() === identity.email.toLowerCase());
+  if (!ticket) return res.status(404).json({ error: 'This ticket is no longer available.' });
+  res.json({ ok: true, ticket: supportPublicTicket(ticket), accessToken: req.params.token });
+});
+app.post('/api/support/tickets/lookup', supportRateLimit(40), async (req, res) => {
+  const reference = String(req.body?.reference || '').trim().toUpperCase();
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  if (!reference || !isEmail(email)) return res.status(400).json({ error: 'Enter the ticket reference and the email used to submit it.' });
+  const ticket = (await readSupportTickets()).find(item => item.reference.toUpperCase() === reference && item.email.toLowerCase() === email);
+  if (!ticket) return res.status(404).json({ error: 'No ticket was found with that reference and email combination.' });
+  res.json({ ok: true, ticket: supportPublicTicket(ticket) });
+});
+app.get('/api/support/tickets/:reference', supportRateLimit(40), async (req, res) => {
   const reference = String(req.params.reference || '').trim().toUpperCase();
   const email = String(req.query.email || '').trim().toLowerCase();
   if (!reference || !isEmail(email)) return res.status(400).json({ error: 'Enter the ticket reference and the email used to submit it.' });
@@ -1881,19 +2145,21 @@ app.get('/api/support/tickets/:reference', async (req, res) => {
   if (!ticket) return res.status(404).json({ error: 'No ticket was found with that reference and email combination.' });
   res.json({ ok: true, ticket: supportPublicTicket(ticket) });
 });
-app.post('/api/support/tickets/:reference/evidence', supportUpload.array('evidenceFiles', 10), async (req,res)=>{
+app.post('/api/support/tickets/:reference/evidence', supportRateLimit(20), supportUpload.array('evidenceFiles', 10), async (req,res)=>{
   try {
     const reference=String(req.params.reference||'').trim().toUpperCase();
-    const email=String(req.body?.email||'').trim().toLowerCase();
+    const credentials=supportTicketCredentials(req, reference);
+    const email=String(credentials?.email||'').trim().toLowerCase();
     const note=String(req.body?.note||'').trim().slice(0,2000);
-    if(!reference||!isEmail(email)) return res.status(400).json({error:'Enter the ticket reference and the email used to submit it.'});
+    if(!reference||!isEmail(email)) { await removeUploaded(req).catch(()=>{}); return res.status(400).json({error:'Enter the ticket reference and the email used to submit it.'}); }
     if(!Array.isArray(req.files)||!req.files.length) return res.status(400).json({error:'Attach at least one evidence file.'});
     let updated=null;
     await mutateSupportTickets(tickets=>{
       const ticket=tickets.find(item=>item.reference.toUpperCase()===reference&&item.email.toLowerCase()===email);
       if(!ticket) return null;
-      if(!['evidence-requested','lacks-evidence','awaiting-student'].includes(ticket.status)) return 'not-requested';
+      if(!['evidence-requested','lacks-evidence','awaiting-student'].includes(ticket.status)) { updated='not-requested'; return ticket; }
       const now=new Date().toISOString();
+      supportResumeSla(ticket);
       ticket.evidence=Array.isArray(ticket.evidence)?ticket.evidence:[];
       ticket.evidence.push(...req.files.map(file=>({...fileRecord(file),source:'student-follow-up',uploadedAt:now,note})));
       ticket.status='in-progress'; ticket.lastUpdatedAt=now;
@@ -1903,53 +2169,260 @@ app.post('/api/support/tickets/:reference/evidence', supportUpload.array('eviden
       ticket.studentUpdates.push({label:'Additional evidence received',message:'Student Support Services has received the additional evidence and the investigation is continuing.',at:now});
       updated={...ticket}; return ticket;
     });
-    if(updated==='not-requested') return res.status(409).json({error:'Student Support has not requested additional evidence for this case.'});
-    if(!updated) return res.status(404).json({error:'No ticket was found with that reference and email combination.'});
+    if(updated==='not-requested') { await removeUploaded(req).catch(()=>{}); return res.status(409).json({error:'Student Support has not requested additional evidence for this case.'}); }
+    if(!updated) { await removeUploaded(req).catch(()=>{}); return res.status(404).json({error:'No ticket was found with that reference and email combination.'}); }
     sendSupportStudentUpdateEmail(updated,{label:'Additional evidence received',message:'We have received your additional evidence and the investigation is continuing.'},req).catch(error=>console.error('Support evidence confirmation email failed:',error.message));
     return res.json({ok:true,ticket:supportPublicTicket(updated)});
   } catch(error) { console.error('Student support evidence upload failed:',error); await removeUploaded(req).catch(()=>{}); return res.status(500).json({error:'The additional evidence could not be uploaded.'}); }
 });
 
-const SUPPORT_STATUS_LABELS = Object.freeze({
-  received: 'Received', triaged: 'Triaged', assigned: 'Assigned', 'awaiting-student': 'Awaiting student', 'evidence-requested': 'Additional evidence requested', 'lacks-evidence': 'Complaint lacks evidence', 'investigation-ongoing': 'Investigation ongoing', 'in-progress': 'In progress', resolved: 'Complaint resolved', reopened: 'Reopened', 'final-decision': 'Final decision issued', closed: 'Closed'
+app.post('/api/support/tickets/:reference/respond', supportRateLimit(20), supportUpload.array('evidenceFiles', 10), async (req, res) => {
+  try {
+    const reference = String(req.params.reference || '').trim().toUpperCase();
+    const credentials = supportTicketCredentials(req, reference);
+    const note = String(req.body?.note || '').trim().slice(0, 4000);
+    const files = Array.isArray(req.files) ? req.files : [];
+    if (!credentials || (!note && !files.length)) { await removeUploaded(req).catch(() => {}); return res.status(400).json({ error: 'Provide a message or attach evidence.' }); }
+    let updated = null;
+    await mutateSupportTickets(tickets => {
+      const ticket = tickets.find(item => item.reference.toUpperCase() === reference && item.email.toLowerCase() === credentials.email.toLowerCase());
+      if (!ticket) return null;
+      if (['accepted','closed','resolved','final-decision'].includes(ticket.status)) { updated = 'closed'; return ticket; }
+      const now = new Date().toISOString();
+      if (ticket.slaPausedAt) supportResumeSla(ticket);
+      ticket.evidence = Array.isArray(ticket.evidence) ? ticket.evidence : [];
+      ticket.evidence.push(...files.map(file => ({ ...fileRecord(file), source: 'student-follow-up', uploadedAt: now, note })));
+      ticket.status = 'in-progress';
+      ticket.lastUpdatedAt = now;
+      ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
+      ticket.auditTrail.push({ action: 'Student response received', note, at: now, by: 'Student' });
+      ticket.studentUpdates = Array.isArray(ticket.studentUpdates) ? ticket.studentUpdates : [];
+      ticket.studentUpdates.push({ label: 'Your response was received', message: note || `${files.length} additional evidence file(s) received.`, at: now });
+      updated = { ...ticket };
+      return ticket;
+    });
+    if (updated === 'closed') { await removeUploaded(req).catch(() => {}); return res.status(409).json({ error: 'Use the decision controls to accept, reopen, or appeal this case.' }); }
+    if (!updated) { await removeUploaded(req).catch(() => {}); return res.status(404).json({ error: 'No ticket was found with those details.' }); }
+    sendSupportStudentUpdateEmail(updated, { label: 'Response received', message: 'Your response and supporting evidence have been added to the case.' }, req).catch(error => console.error('Support response email failed:', error.message));
+    return res.json({ ok: true, ticket: supportPublicTicket(updated) });
+  } catch (error) { console.error('Student support response failed:', error); await removeUploaded(req).catch(() => {}); return res.status(500).json({ error: 'Your response could not be submitted.' }); }
 });
+
+function supportAppealUnit(ticket) {
+  if (ticket.sensitive) return 'provost';
+  if (['programme-department','assessment-project'].includes(ticket.categoryKey)) {
+    return ['education','business'].includes(ticket.academicDepartment) ? 'directorate-education-business' : 'directorate-arts-stem';
+  }
+  if (['certificate','change-of-name','transcript'].includes(ticket.categoryKey)) return 'provost';
+  return 'college-registrar';
+}
+app.post('/api/support/tickets/:reference/decision', supportRateLimit(12), async (req, res) => {
+  const reference = String(req.params.reference || '').trim().toUpperCase();
+  const credentials = supportTicketCredentials(req, reference);
+  const action = String(req.body?.action || '').trim();
+  const reason = String(req.body?.reason || '').trim().slice(0, 4000);
+  if (!credentials || !['accept','reopen','appeal'].includes(action)) return res.status(400).json({ error: 'Choose a valid response to the decision.' });
+  if (['reopen','appeal'].includes(action) && reason.length < 10) return res.status(400).json({ error: 'Briefly explain why the matter remains unresolved or why you are appealing.' });
+  let updated = null;
+  await mutateSupportTickets(tickets => {
+    const ticket = tickets.find(item => item.reference.toUpperCase() === reference && item.email.toLowerCase() === credentials.email.toLowerCase());
+    if (!ticket) return null;
+    if (!['resolved','final-decision','closed'].includes(ticket.status)) { updated = 'not-ready'; return ticket; }
+    const now = new Date().toISOString();
+    ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
+    ticket.studentUpdates = Array.isArray(ticket.studentUpdates) ? ticket.studentUpdates : [];
+    if (action === 'accept') {
+      ticket.status = 'accepted';
+      ticket.acceptedAt = now;
+      ticket.closedAt = now;
+      ticket.studentUpdates.push({ label: 'Resolution accepted', message: 'You accepted the resolution and the case is now closed.', at: now });
+      ticket.auditTrail.push({ action: 'Resolution accepted and case closed', note: reason, at: now, by: 'Student' });
+    } else if (action === 'reopen') {
+      if (ticket.studentResponseDueAt && new Date(ticket.studentResponseDueAt).getTime() < Date.now()) { updated = 'window-expired'; return ticket; }
+      ticket.status = 'reopened';
+      ticket.reopenedAt = now;
+      ticket.studentResponseDueAt = null;
+      ticket.dueAt = supportMoveWorkingDays(now, 5);
+      ticket.ownerUnit = STAFF_UNITS['student-support'].label;
+      ticket.ownerUnitId = 'student-support';
+      ticket.studentUpdates.push({ label: 'Case reopened', message: reason, at: now });
+      ticket.auditTrail.push({ action: 'Case reopened by student', note: reason, at: now, by: 'Student' });
+    } else {
+      const targetUnit = supportAppealUnit(ticket);
+      const sourceUnit = ticket.ownerUnitId || 'student-support';
+      ticket.status = 'appealed';
+      ticket.appealedAt = now;
+      ticket.studentResponseDueAt = null;
+      ticket.dueAt = supportMoveWorkingDays(now, 5);
+      ticket.ownerUnit = STAFF_UNITS[targetUnit].label;
+      ticket.ownerUnitId = targetUnit;
+      ticket.referrals = Array.isArray(ticket.referrals) ? ticket.referrals : [];
+      ticket.referrals.push({ id: crypto.randomUUID(), sourceUnit, sourceLabel: STAFF_UNITS[sourceUnit]?.label || sourceUnit, targetUnit, targetLabel: STAFF_UNITS[targetUnit].label, status: 'assigned', origin: 'student-appeal', comment: reason, createdAt: now, reassignmentHistory: [] });
+      ticket.studentUpdates.push({ label: 'Appeal registered', message: `Your appeal has been registered with ${STAFF_UNITS[targetUnit].label}.`, at: now });
+      ticket.auditTrail.push({ action: `Appeal registered with ${STAFF_UNITS[targetUnit].label}`, note: reason, at: now, by: 'Student' });
+    }
+    ticket.lastUpdatedAt = now;
+    updated = { ...ticket };
+    return ticket;
+  });
+  if (updated === 'not-ready') return res.status(409).json({ error: 'A resolution must be recorded before this response is available.' });
+  if (updated === 'window-expired') return res.status(409).json({ error: 'The reopening period has ended. Submit an appeal instead.' });
+  if (!updated) return res.status(404).json({ error: 'No ticket was found with those details.' });
+  sendSupportStudentUpdateEmail(updated, { label: action === 'accept' ? 'Resolution accepted' : action === 'reopen' ? 'Case reopened' : 'Appeal registered', message: reason }, req).catch(error => console.error('Support decision email failed:', error.message));
+  return res.json({ ok: true, ticket: supportPublicTicket(updated) });
+});
+
+app.post('/api/support/tickets/:reference/feedback', supportRateLimit(10), async (req, res) => {
+  const reference = String(req.params.reference || '').trim().toUpperCase();
+  const credentials = supportTicketCredentials(req, reference);
+  const rating = Number(req.body?.rating);
+  const resolved = String(req.body?.resolved || '').trim();
+  const comment = String(req.body?.comment || '').trim().slice(0, 2000);
+  if (!credentials || !Number.isInteger(rating) || rating < 1 || rating > 5 || !['yes','partly','no'].includes(resolved)) return res.status(400).json({ error: 'Choose a rating from 1 to 5 and tell us whether the matter was resolved.' });
+  if (rating <= 2 && comment.length < 10) return res.status(400).json({ error: 'Please briefly explain a low rating so the service can be improved.' });
+  let updated = null;
+  await mutateSupportTickets(tickets => {
+    const ticket = tickets.find(item => item.reference.toUpperCase() === reference && item.email.toLowerCase() === credentials.email.toLowerCase());
+    if (!ticket) return null;
+    if (!['accepted','closed'].includes(ticket.status)) { updated = 'not-closed'; return ticket; }
+    const now = new Date().toISOString();
+    ticket.feedback = { rating, resolved, comment, submittedAt: now };
+    ticket.lastUpdatedAt = now;
+    ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
+    ticket.auditTrail.push({ action: 'Student service feedback submitted', note: `Rating ${rating}/5; resolved: ${resolved}.`, at: now, by: 'Student' });
+    updated = { ...ticket };
+    return ticket;
+  });
+  if (updated === 'not-closed') return res.status(409).json({ error: 'Service feedback becomes available after the case is closed.' });
+  if (!updated) return res.status(404).json({ error: 'No ticket was found with those details.' });
+  return res.json({ ok: true, ticket: supportPublicTicket(updated) });
+});
+
+const SUPPORT_STATUS_LABELS = Object.freeze({
+  received: 'Received', triaged: 'Triaged', assigned: 'Assigned', accepted: 'Resolution accepted', appealed: 'Appealed', 'awaiting-student': 'Awaiting student', 'evidence-requested': 'Additional evidence requested', 'lacks-evidence': 'Additional evidence needed', 'investigation-ongoing': 'Investigation ongoing', 'in-progress': 'In progress', resolved: 'Resolved', reopened: 'Reopened', 'final-decision': 'Final decision issued', closed: 'Closed'
+});
+app.use('/api/support/admin', supportSameOrigin);
 app.get('/support-admin', supportWorkspaceAuth, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'support-admin.html')));
 app.get('/support-admin.js', supportWorkspaceAuth, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'support-admin.js')));
-app.get('/api/support/admin/tickets', supportWorkspaceAuth, async (_req, res) => {
-  const tickets = await readSupportTickets();
-  res.json({ ok: true, tickets: tickets.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).map(ticket => ({
+app.get('/api/support/admin/me', supportWorkspaceAuth, async (req, res) => res.json({ ok:true, identity:{ name:req.supportIdentity?.name || req.supportIdentity?.username || 'Student Support officer', role:req.supportIdentity?.role || 'viewer', units:normalizeStaffUnits(req.supportIdentity?.units), confidentialAccess:canAccessSensitiveSupport(req.supportIdentity) } }));
+app.post('/api/support/admin/lifecycle/refresh', supportWorkspaceAuth, requireSupportRole('officer'), async (_req, res) => {
+  await refreshSupportLifecycle();
+  res.json({ ok:true, refreshedAt:new Date().toISOString() });
+});
+function filterSupportAdminTickets(tickets, identity, query = {}) {
+  const units = normalizeStaffUnits(identity?.units);
+  let filtered = tickets.filter(ticket => canAccessSupportTicket(identity, ticket));
+  if (units.includes('confidential-handler') && !units.includes('student-support') && !identity?.developer) filtered = filtered.filter(ticket => ticket.sensitive);
+  const search = String(query.search || '').trim().toLowerCase();
+  const status = String(query.status || '').trim();
+  const category = String(query.category || '').trim();
+  const priority = String(query.priority || '').trim();
+  const owner = String(query.owner || '').trim();
+  const confidentiality = String(query.confidentiality || '').trim();
+  if (search) filtered = filtered.filter(ticket => [ticket.reference,ticket.name,ticket.email,ticket.studentNumber,ticket.subject,ticket.studyCentre,ticket.programme].some(value => String(value || '').toLowerCase().includes(search)));
+  if (status) filtered = filtered.filter(ticket => ticket.status === status);
+  if (category) filtered = filtered.filter(ticket => ticket.categoryKey === category);
+  if (priority) filtered = filtered.filter(ticket => ticket.priorityKey === priority);
+  if (owner) filtered = filtered.filter(ticket => (ticket.ownerUnitId || '') === owner);
+  if (confidentiality === 'restricted') filtered = filtered.filter(ticket => ticket.sensitive);
+  if (confidentiality === 'standard') filtered = filtered.filter(ticket => !ticket.sensitive);
+  return filtered.sort((a, b) => String(b.lastUpdatedAt || b.createdAt).localeCompare(String(a.lastUpdatedAt || a.createdAt)));
+}
+app.get('/api/support/admin/tickets', supportWorkspaceAuth, async (req, res) => {
+  const allTickets = await readSupportTickets();
+  const permissionTotal = filterSupportAdminTickets(allTickets, req.supportIdentity, {}).length;
+  const tickets = filterSupportAdminTickets(allTickets, req.supportIdentity, req.query);
+  const total = tickets.length;
+  const pageSize = Math.min(100, Math.max(10, Number(req.query.pageSize || 25) || 25));
+  const page = Math.max(1, Number(req.query.page || 1) || 1);
+  const start = (page - 1) * pageSize;
+  const pageTickets = tickets.slice(start, start + pageSize);
+  res.json({ ok: true, total, permissionTotal, page, pageSize, pages: Math.max(1, Math.ceil(total / pageSize)), tickets: pageTickets.map(ticket => ({
     id: ticket.id, reference: ticket.reference, name: ticket.name, email: ticket.email, type: ticket.type, studyLevel: ticket.studyLevelLabel || '',
     categoryKey: ticket.categoryKey, category: ticket.categoryLabel, priority: ticket.priorityLabel, status: ticket.status, statusLabel: SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,
-    ownerUnit: ticket.ownerUnit, intendedUnit: ticket.intendedUnit || '', supportUnit: ticket.supportUnit, studyCentre: ticket.studyCentre, subject: ticket.subject,
+    priorityKey: ticket.priorityKey, ownerUnit: ticket.ownerUnit, ownerUnitId: ticket.ownerUnitId || '', assignedCaseOwner: ticket.assignedCaseOwner || '', intendedUnit: ticket.intendedUnit || '', supportUnit: ticket.supportUnit, studyCentre: ticket.studyCentre, programme: ticket.programme || '', academicDepartment: ticket.academicDepartment || '', subject: ticket.subject,
     description: ticket.description, originRole: ticket.originRole, sensitive: ticket.sensitive, createdAt: ticket.createdAt,
-    dueAt: ticket.dueAt, lastUpdatedAt: ticket.lastUpdatedAt, resolution: ticket.resolution || '', auditTrail: ticket.auditTrail || [], studentUpdates:ticket.studentUpdates||[], evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [], officerEvidence:Array.isArray(ticket.officerEvidence)?ticket.officerEvidence:[], forwardHistory: ticket.forwardHistory || [], referrals: ticket.referrals || [], interUnitMessages:ticket.interUnitMessages||[]
+    dueAt: ticket.dueAt, assignmentDueAt: ticket.assignmentDueAt || null, lastUpdatedAt: ticket.lastUpdatedAt, resolution: ticket.resolution || '', feedback: ticket.feedback || null, sla: supportSlaSummary(ticket), auditTrail: ticket.auditTrail || [], studentUpdates:ticket.studentUpdates||[], evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [], officerEvidence:Array.isArray(ticket.officerEvidence)?ticket.officerEvidence:[], forwardHistory: ticket.forwardHistory || [], referrals: ticket.referrals || [], interUnitMessages:ticket.interUnitMessages||[]
   })) });
+});
+function supportCsvValue(value) {
+  const text = String(value ?? '').replace(/\r?\n/g, ' ').trim();
+  const safe = /^[=+\-@]/.test(text) ? `'${text}` : text;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
+app.get('/api/support/admin/tickets.csv', supportWorkspaceAuth, async (req, res) => {
+  const tickets = filterSupportAdminTickets(await readSupportTickets(), req.supportIdentity, req.query);
+  const headers = ['Reference','Created','Last updated','Status','Priority','Category','Confidentiality','Student','Email','Student number','Study centre','Programme','Responsible unit','Assigned officer','Due','SLA','First response hours','Resolution hours','Feedback rating','Feedback resolved'];
+  const hours = (start, end) => start && end ? Math.max(0, (new Date(end).getTime() - new Date(start).getTime()) / 3600000).toFixed(1) : '';
+  const rows = tickets.map(ticket => {
+    const sla = supportSlaSummary(ticket);
+    const slaLabel = sla.overdue ? 'Overdue' : sla.atRisk ? 'At risk' : sla.paused ? 'Paused' : 'On track';
+    return [ticket.reference,ticket.createdAt,ticket.lastUpdatedAt,SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,ticket.priorityLabel,ticket.categoryLabel,ticket.sensitive ? 'Restricted' : 'Standard',ticket.name,ticket.email,ticket.studentNumber,ticket.studyCentre,ticket.programme,ticket.ownerUnit,ticket.assignedCaseOwner,ticket.dueAt,slaLabel,hours(ticket.createdAt,ticket.firstResponseAt),hours(ticket.createdAt,ticket.resolvedAt),ticket.feedback?.rating || '',ticket.feedback?.resolved || ''].map(supportCsvValue).join(',');
+  });
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="student-support-cases-${supportDateKey(new Date())}.csv"`);
+  res.send(`\uFEFF${[headers.map(supportCsvValue).join(','), ...rows].join('\r\n')}`);
 });
 app.patch('/api/support/admin/tickets/:id', supportWorkspaceAuth, requireSupportRole('officer'), async (req, res) => {
   const nextStatus = String(req.body?.status || '').trim();
   if (!Object.prototype.hasOwnProperty.call(SUPPORT_STATUS_LABELS, nextStatus)) return res.status(400).json({ error: 'Choose a valid ticket status.' });
-  const ownerUnit = cleanHumanText(req.body?.ownerUnit).slice(0, 180);
+  if (nextStatus === 'accepted') return res.status(400).json({ error: 'Only the student may accept a resolution.' });
+  const categoryKey = String(req.body?.categoryKey || '').trim();
+  const priorityKey = String(req.body?.priorityKey || '').trim();
+  const ownerUnitId = String(req.body?.ownerUnitId || '').trim();
+  const assignedCaseOwner = cleanHumanText(req.body?.assignedCaseOwner).slice(0, 180);
   const note = String(req.body?.note || '').trim().slice(0, 2000);
   if(['evidence-requested','lacks-evidence','investigation-ongoing','resolved','final-decision','closed'].includes(nextStatus)&&!note) return res.status(400).json({error:'Provide a clear message for the student before recording this case update.'});
   let updated = null;
   await mutateSupportTickets(tickets => {
     const ticket = tickets.find(item => item.id === req.params.id);
     if (!ticket) return null;
+    if (!canAccessSupportTicket(req.supportIdentity, ticket)) { updated = 'forbidden'; return ticket; }
     const now = new Date().toISOString();
+    const classificationChanged = categoryKey && SUPPORT_CATEGORIES[categoryKey] && categoryKey !== ticket.categoryKey;
+    const priorityChanged = priorityKey && SUPPORT_PRIORITIES[priorityKey] && priorityKey !== ticket.priorityKey;
+    if (classificationChanged) {
+      ticket.categoryKey = categoryKey;
+      ticket.categoryLabel = SUPPORT_CATEGORIES[categoryKey].label;
+      ticket.intendedUnit = SUPPORT_CATEGORIES[categoryKey].owner;
+      ticket.sensitive = categoryKey === 'sensitive';
+      ticket.confidentiality = ticket.sensitive ? 'restricted' : 'standard';
+      if (ticket.sensitive) {
+        ticket.ownerUnitId = 'confidential-handler';
+        ticket.ownerUnit = STAFF_UNITS['confidential-handler'].label;
+        ticket.referrals = Array.isArray(ticket.referrals) ? ticket.referrals : [];
+        if (!ticket.referrals.some(referral => referral.targetUnit === 'confidential-handler' && !['reassigned','closed','cancelled'].includes(referral.status))) ticket.referrals.push({ id:crypto.randomUUID(), sourceUnit:'student-support', sourceLabel:STAFF_UNITS['student-support'].label, targetUnit:'confidential-handler', targetLabel:STAFF_UNITS['confidential-handler'].label, status:'assigned', origin:'confidential-triage', comment:note || 'Reclassified for restricted handling.', createdAt:now, reassignmentHistory:[] });
+      }
+    }
+    if (priorityChanged) {
+      ticket.priorityKey = priorityKey;
+      ticket.priorityLabel = SUPPORT_PRIORITIES[priorityKey].label;
+    }
+    if ((classificationChanged || priorityChanged) && !ticket.slaPausedAt) ticket.dueAt = supportMoveWorkingDays(now, supportDueDays(ticket.categoryKey, ticket.priorityKey, ticket.sensitive));
     ticket.status = nextStatus;
-    if (ownerUnit) ticket.ownerUnit = ownerUnit;
-    if (['resolved','final-decision','closed'].includes(nextStatus)) ticket.studentResponseDueAt = supportDateFromHours(120);
+    if (ownerUnitId && Object.prototype.hasOwnProperty.call(STAFF_UNITS, ownerUnitId)) {
+      if (ticket.sensitive && !['confidential-handler','provost'].includes(ownerUnitId)) { updated = 'restricted-route'; return ticket; }
+      ticket.ownerUnitId = ownerUnitId;
+      ticket.ownerUnit = STAFF_UNITS[ownerUnitId].label;
+    }
+    if (assignedCaseOwner) ticket.assignedCaseOwner = assignedCaseOwner;
+    if (!ticket.firstResponseAt && nextStatus !== 'received') ticket.firstResponseAt = now;
+    if (['evidence-requested','lacks-evidence','awaiting-student'].includes(nextStatus)) supportPauseSla(ticket, note || 'Awaiting student information');
+    else if (ticket.slaPausedAt) supportResumeSla(ticket);
+    if (['resolved','final-decision','closed'].includes(nextStatus)) ticket.studentResponseDueAt = supportMoveWorkingDays(now, 5);
     if (nextStatus === 'reopened') ticket.studentResponseDueAt = null;
     if (note) ticket.resolution = ['resolved','final-decision','closed'].includes(nextStatus) ? note : ticket.resolution || '';
     ticket.lastUpdatedAt = now;
     ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
-    ticket.auditTrail.push({ action: `Status changed to ${SUPPORT_STATUS_LABELS[nextStatus]}`, note, at: now, by: 'Support administrator' });
+    ticket.auditTrail.push({ action: `Status changed to ${SUPPORT_STATUS_LABELS[nextStatus]}`, note, at: now, by: req.supportIdentity?.name || 'Support administrator' });
     ticket.studentUpdates=Array.isArray(ticket.studentUpdates)?ticket.studentUpdates:[];
     ticket.studentUpdates.push({label:SUPPORT_STATUS_LABELS[nextStatus],message:note||`Your case status is now ${SUPPORT_STATUS_LABELS[nextStatus]}.`,at:now});
     if (ticket.auditTrail.length > 100) ticket.auditTrail = ticket.auditTrail.slice(-100);
     updated={...ticket};
     return ticket;
   });
+  if (updated === 'forbidden') return res.status(403).json({ error: 'You do not have access to this restricted case.' });
+  if (updated === 'restricted-route') return res.status(400).json({ error: 'Sensitive cases may only be assigned to the Confidential Case Handler or Provost.' });
   if (!updated) return res.status(404).json({ error: 'Support ticket not found.' });
   sendSupportStudentUpdateEmail(updated,{label:SUPPORT_STATUS_LABELS[updated.status],message:note},req).catch(error=>console.error('Support status email failed:',error.message));
   res.json({ ok: true, ticket: supportPublicTicket(updated) });
@@ -1962,10 +2435,9 @@ function supportEvidenceFor(ticket, index, collection='evidence') {
   const filePath = path.join(FILES_DIR, path.basename(file.storedName));
   return fs.existsSync(filePath) ? { file, filePath } : null;
 }
-function sendSupportEvidence(res, evidence) {
-  res.setHeader('Content-Type', evidence.file.mimeType || 'application/octet-stream');
-  res.setHeader('Content-Disposition', `inline; filename="${safeBaseName(evidence.file.originalName)}"`);
-  return res.sendFile(evidence.filePath);
+async function sendSupportEvidence(req, res, evidence) {
+  if (String(req.query.download || '') === '1') return res.download(evidence.filePath, safeBaseName(evidence.file.originalName || 'evidence'));
+  return sendInlineClaimPreview(res, evidence.file, 'Evidence Preview');
 }
 function supportForwardForToken(tickets, token) {
   const tokenHash = hashOneTimeToken(token);
@@ -1987,16 +2459,18 @@ function secureSupportForwardPage(ticket, forward, token) {
 app.get('/api/support/admin/tickets/:id/evidence/:index', supportWorkspaceAuth, async (req, res) => {
   const ticket = (await readSupportTickets()).find(item => item.id === req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Support ticket not found.' });
+  if (!canAccessSupportTicket(req.supportIdentity, ticket)) return res.status(403).json({ error: 'You do not have access to this restricted case.' });
   const evidence = supportEvidenceFor(ticket, req.params.index);
   if (!evidence) return res.status(404).json({ error: 'Evidence file not found.' });
-  return sendSupportEvidence(res, evidence);
+  return sendSupportEvidence(req, res, evidence);
 });
 app.get('/api/support/admin/tickets/:id/officer-evidence/:index', supportWorkspaceAuth, async (req,res)=>{
   const ticket=(await readSupportTickets()).find(item=>item.id===req.params.id);
   if(!ticket) return res.status(404).json({error:'Support ticket not found.'});
+  if(!canAccessSupportTicket(req.supportIdentity,ticket)) return res.status(403).json({error:'You do not have access to this restricted case.'});
   const evidence=supportEvidenceFor(ticket,req.params.index,'officerEvidence');
   if(!evidence) return res.status(404).json({error:'Officer evidence file not found.'});
-  return sendSupportEvidence(res,evidence);
+  return sendSupportEvidence(req,res,evidence);
 });
 app.post('/api/support/admin/tickets/:id/officer-evidence', supportWorkspaceAuth, requireSupportRole('officer'), supportUpload.array('evidenceFiles',10), async(req,res)=>{
   try {
@@ -2005,36 +2479,53 @@ app.post('/api/support/admin/tickets/:id/officer-evidence', supportWorkspaceAuth
     let updated=null;
     await mutateSupportTickets(tickets=>{
       const ticket=tickets.find(item=>item.id===req.params.id); if(!ticket) return null;
+      if(!canAccessSupportTicket(req.supportIdentity,ticket)) { updated='forbidden'; return ticket; }
       const now=new Date().toISOString(); ticket.officerEvidence=Array.isArray(ticket.officerEvidence)?ticket.officerEvidence:[];
       ticket.officerEvidence.push(...req.files.map(file=>({...fileRecord(file),uploadedAt:now,note,uploadedBy:req.supportIdentity?.name||'Support officer'})));
       ticket.lastUpdatedAt=now; ticket.auditTrail=Array.isArray(ticket.auditTrail)?ticket.auditTrail:[];
       ticket.auditTrail.push({action:'Officer evidence added',note,at:now,by:req.supportIdentity?.name||'Support officer'});
       updated={...ticket}; return ticket;
     });
+    if(updated==='forbidden') { await removeUploaded(req).catch(()=>{}); return res.status(403).json({error:'You do not have access to this restricted case.'}); }
     if(!updated) return res.status(404).json({error:'Support ticket not found.'});
     return res.json({ok:true,evidenceCount:updated.officerEvidence.length});
   } catch(error) { console.error('Officer evidence upload failed:',error); await removeUploaded(req).catch(()=>{}); return res.status(500).json({error:'Officer evidence could not be uploaded.'}); }
 });
+
+async function supportUnitNotificationRecipients(unitId) {
+  const accounts = await readAdminUsers();
+  return [...new Set(accounts.filter(account => account.active !== false && normalizeStaffUnits(account.units).includes(unitId) && (ROLE_RANK[account.role] || 0) >= ROLE_RANK.officer && isEmail(account.email)).map(account => String(account.email).trim().toLowerCase()))];
+}
+function supportEmailsAreInstitutional(emails) {
+  return emails.every(email => {
+    const domain = String(email).split('@').pop().toLowerCase();
+    return [...SUPPORT_ALLOWED_EMAIL_DOMAINS].some(allowed => domain === allowed || domain.endsWith(`.${allowed}`));
+  });
+}
 app.post('/api/support/admin/tickets/:id/messages', supportWorkspaceAuth, requireSupportRole('officer'), async(req,res)=>{
-  const recipientName=cleanHumanText(req.body?.recipientName).slice(0,180);
-  const recipientEmail=String(req.body?.recipientEmail||'').trim().toLowerCase();
+  const targetUnit=String(req.body?.targetUnit||'').trim();
+  const recipientName=STAFF_UNITS[targetUnit]?.label || '';
+  const recipientEmails=Object.prototype.hasOwnProperty.call(STAFF_UNITS,targetUnit) ? await supportUnitNotificationRecipients(targetUnit) : [];
   const message=String(req.body?.message||'').trim().slice(0,4000);
-  if(!recipientName||!recipientEmail||!message) return res.status(400).json({error:'Recipient unit, official email and message are required.'});
-  if(!isEmail(recipientEmail)) return res.status(400).json({error:'Enter a valid official unit email address.'});
+  if(!recipientName||!message) return res.status(400).json({error:'Select the receiving unit and provide the information required.'});
+  if(!recipientEmails.length) return res.status(409).json({error:'The selected unit has no active officer email. Ask the System Administrator to assign an officer account.'});
+  if(!supportEmailsAreInstitutional(recipientEmails)) return res.status(409).json({error:'The selected unit has a non-institutional email address. Correct the staff account before sharing case information.'});
   if(!gmailConfigured()) return res.status(503).json({error:'Inter-unit messaging email is not configured yet.'});
   const now=new Date().toISOString(); let ticketForEmail=null; const messageId=crypto.randomUUID();
   await mutateSupportTickets(tickets=>{
     const ticket=tickets.find(item=>item.id===req.params.id); if(!ticket) return null;
     ticket.interUnitMessages=Array.isArray(ticket.interUnitMessages)?ticket.interUnitMessages:[];
-    ticket.interUnitMessages.push({id:messageId,recipientName,recipientEmail,message,status:'pending',createdAt:now,sentBy:req.supportIdentity?.name||'Support officer'});
+    if(!canAccessSupportTicket(req.supportIdentity,ticket)) { ticketForEmail='forbidden'; return ticket; }
+    ticket.interUnitMessages.push({id:messageId,targetUnit,recipientName,recipientCount:recipientEmails.length,message,status:'pending',createdAt:now,sentBy:req.supportIdentity?.name||'Support officer'});
     ticket.auditTrail=Array.isArray(ticket.auditTrail)?ticket.auditTrail:[];
     ticket.auditTrail.push({action:`Information requested from ${recipientName}`,note:message,at:now,by:req.supportIdentity?.name||'Support officer'});
     ticket.lastUpdatedAt=now; ticketForEmail=JSON.parse(JSON.stringify(ticket)); return ticket;
   });
+  if(ticketForEmail==='forbidden') return res.status(403).json({error:'You do not have access to this restricted case.'});
   if(!ticketForEmail) return res.status(404).json({error:'Support ticket not found.'});
   try {
     const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Information requested by Student Support Services</h2><p>Student Support Services requests information from ${htmlEscape(recipientName)} regarding the case below.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #d4a72c"><strong>Reference:</strong> ${htmlEscape(ticketForEmail.reference)}<br><strong>Category:</strong> ${htmlEscape(ticketForEmail.categoryLabel)}<br><strong>Student:</strong> ${htmlEscape(ticketForEmail.name)}<br><strong>Subject:</strong> ${htmlEscape(ticketForEmail.subject)}</div><p><strong>Request</strong><br>${htmlEscape(message).replace(/\n/g,'<br>')}</p><p>Please reply through the official Student Support communication channel, quoting the reference number.</p><p>Regards,<br>Student Support Services<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
-    await sendGmailHtmlEmail({to:recipientEmail,subject:`Information requested: ${ticketForEmail.reference}`,html});
+    await Promise.all(recipientEmails.map(to => sendGmailHtmlEmail({to,subject:`Information requested: ${ticketForEmail.reference}`,html})));
     await mutateSupportTickets(tickets=>{const item=tickets.find(ticket=>ticket.id===req.params.id)?.interUnitMessages?.find(item=>item.id===messageId);if(item){item.status='sent';item.sentAt=new Date().toISOString();}return tickets;});
     return res.json({ok:true,reference:ticketForEmail.reference});
   } catch(error) { console.error('Inter-unit support message failed:',error); await mutateSupportTickets(tickets=>{const item=tickets.find(ticket=>ticket.id===req.params.id)?.interUnitMessages?.find(item=>item.id===messageId);if(item){item.status='failed';item.error=String(error.message||'Email delivery failed').slice(0,500);}return tickets;}); return res.status(502).json({error:'The message could not be delivered. Check the official email and try again.'}); }
@@ -2042,12 +2533,12 @@ app.post('/api/support/admin/tickets/:id/messages', supportWorkspaceAuth, requir
 
 app.post('/api/support/admin/tickets/:id/forward', supportWorkspaceAuth, requireSupportRole('officer'), async (req, res) => {
   const recipientUnit = String(req.body?.recipientUnit || '').trim();
-  const officeName = cleanHumanText(req.body?.officeName).slice(0, 180);
-  const officeEmail = String(req.body?.officeEmail || '').trim().toLowerCase();
+  const officeName = STAFF_UNITS[recipientUnit]?.label || '';
+  const recipientEmails = Object.prototype.hasOwnProperty.call(STAFF_UNITS, recipientUnit) ? await supportUnitNotificationRecipients(recipientUnit) : [];
+  const officeEmail = recipientEmails.join(', ');
   const comment = String(req.body?.comment || '').trim().slice(0, 4000);
   if (!Object.prototype.hasOwnProperty.call(STAFF_UNITS, recipientUnit)) return res.status(400).json({ error: 'Select the receiving functional unit.' });
-  if (!officeName || !officeEmail || !comment) return res.status(400).json({ error: 'Office name, official office email and Student Support comments are required.' });
-  if (!isEmail(officeEmail)) return res.status(400).json({ error: 'Enter a valid official office email address.' });
+  if (!comment) return res.status(400).json({ error: 'Provide clear routing comments for the receiving unit.' });
   const rawToken = crypto.randomBytes(32).toString('hex');
   const forwardId = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -2056,33 +2547,40 @@ app.post('/api/support/admin/tickets/:id/forward', supportWorkspaceAuth, require
   await mutateSupportTickets(tickets => {
     const ticket = tickets.find(item => item.id === req.params.id);
     if (!ticket) return null;
+    if (!canAccessSupportTicket(req.supportIdentity, ticket)) { ticketForEmail = 'forbidden'; return ticket; }
+    if (ticket.sensitive && !['confidential-handler','provost'].includes(recipientUnit)) { ticketForEmail = 'restricted-route'; return ticket; }
     const forward = { id: forwardId, recipientUnit, officeName, officeEmail, comment, tokenHash: hashOneTimeToken(rawToken), createdAt: now, expiresAt, status: 'pending' };
     ticket.forwardHistory = Array.isArray(ticket.forwardHistory) ? ticket.forwardHistory : [];
     ticket.forwardHistory.push(forward);
     ticket.referrals = Array.isArray(ticket.referrals) ? ticket.referrals : [];
     ticket.referrals.push({ id: forwardId, sourceUnit: 'student-support', sourceLabel: STAFF_UNITS['student-support'].label, targetUnit: recipientUnit, targetLabel: STAFF_UNITS[recipientUnit].label, officeName, officeEmail, comment, status: 'registered', createdAt: now, reassignmentHistory: [] });
     ticket.ownerUnit = STAFF_UNITS[recipientUnit].label;
+    ticket.ownerUnitId = recipientUnit;
     ticket.supportUnit = STAFF_UNITS['student-support'].label;
     ticket.supportFollowUp = true;
     ticket.assignedCaseOwner = req.supportIdentity?.name || 'Student Support Services';
     ticket.status = 'assigned';
     ticket.lastUpdatedAt = now;
     ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
-    ticket.auditTrail.push({ action: `Forwarded to ${officeName}`, note: comment, at: now, by: 'Support administrator' });
+    ticket.auditTrail.push({ action: `Forwarded to ${officeName}`, note: comment, at: now, by: req.supportIdentity?.name || 'Support administrator' });
     if (ticket.auditTrail.length > 100) ticket.auditTrail = ticket.auditTrail.slice(-100);
     ticketForEmail = JSON.parse(JSON.stringify(ticket));
     return ticket;
   });
+  if (ticketForEmail === 'forbidden') return res.status(403).json({ error: 'You do not have access to this restricted case.' });
+  if (ticketForEmail === 'restricted-route') return res.status(400).json({ error: 'Sensitive cases may only be referred to the Confidential Case Handler or Provost.' });
   if (!ticketForEmail) return res.status(404).json({ error: 'Support ticket not found.' });
+  if (!recipientEmails.length) return res.json({ ok: true, reference: ticketForEmail.reference, expiresAt, emailStatus: 'unit-unassigned', message: 'The case is registered in the receiving unit portal. Assign an officer account to notify the unit.' });
+  if (!supportEmailsAreInstitutional(recipientEmails)) return res.json({ ok: true, reference: ticketForEmail.reference, expiresAt, emailStatus: 'blocked', message: 'The case is registered, but notification was blocked because the unit email is not institutional.' });
   if (!gmailConfigured()) return res.json({ ok: true, reference: ticketForEmail.reference, expiresAt, emailStatus: 'not-configured', message: 'The case is registered in the receiving unit portal. Email notification is not configured yet.' });
   const secureUrl = `${baseUrlFor(req)}/secure/support/${rawToken}`;
   try {
     const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Student Support matter forwarded</h2><p>Student Support Services has forwarded a matter for your office's attention.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #d4a72c"><strong>Reference:</strong> ${htmlEscape(ticketForEmail.reference)}<br><strong>Category:</strong> ${htmlEscape(ticketForEmail.categoryLabel)}<br><strong>Learner level:</strong> ${htmlEscape(ticketForEmail.studyLevelLabel || 'Not stated')}<br><strong>Subject:</strong> ${htmlEscape(ticketForEmail.subject)}</div><p><strong>Student Support comments</strong><br>${htmlEscape(comment).replace(/\n/g, '<br>')}</p><p><a href="${htmlEscape(secureUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Open the confidential case file</a></p><p>This secure link includes the submitted evidence and expires on ${htmlEscape(new Date(expiresAt).toLocaleDateString('en-GB'))}. Do not forward it outside your office.</p><p>Regards,<br>Student Support Services<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
-    const result = await sendGmailHtmlEmail({ to: officeEmail, subject: `Action required: ${ticketForEmail.reference} - ${ticketForEmail.subject}`, html });
+    const results = await Promise.all(recipientEmails.map(to => sendGmailHtmlEmail({ to, subject: `Action required: ${ticketForEmail.reference} - ${ticketForEmail.subject}`, html })));
     await mutateSupportTickets(tickets => {
       const item=tickets.find(item => item.id === req.params.id);
       const forward = item?.forwardHistory?.find(item => item.id === forwardId);
-      if (forward) { forward.status = 'sent'; forward.sentAt = new Date().toISOString(); forward.messageId = result?.id || ''; }
+      if (forward) { forward.status = 'sent'; forward.sentAt = new Date().toISOString(); forward.messageId = results[0]?.id || ''; forward.recipientCount = recipientEmails.length; }
       const referral=item?.referrals?.find(item=>item.id===forwardId);
       if(referral){referral.status='sent';referral.sentAt=new Date().toISOString();}
       return tickets;
@@ -2105,7 +2603,7 @@ app.post('/api/support/admin/tickets/:id/forward', supportWorkspaceAuth, require
 function activeReferralForUnits(ticket, unitIds) {
   const allowed = new Set(normalizeStaffUnits(unitIds));
   return [...(Array.isArray(ticket?.referrals) ? ticket.referrals : [])].reverse().find(referral =>
-    allowed.has(referral.targetUnit) && !['reassigned', 'closed', 'cancelled'].includes(referral.status)
+    allowed.has(referral.targetUnit) && !['reassigned', 'closed', 'cancelled', 'resolved', 'returned-to-support'].includes(referral.status)
   ) || null;
 }
 async function reassignSupportReferral(ticketId, { targetUnit, note, actor, sourceUnits, allowUnassigned=false }) {
@@ -2113,6 +2611,7 @@ async function reassignSupportReferral(ticketId, { targetUnit, note, actor, sour
   await mutateSupportTickets(tickets => {
     const ticket = tickets.find(item => item.id === ticketId);
     if (!ticket) return tickets;
+    if (ticket.sensitive && !['confidential-handler','provost'].includes(targetUnit)) { result = { state: 'restricted-route' }; return tickets; }
     ticket.referrals = Array.isArray(ticket.referrals) ? ticket.referrals : [];
     const current = activeReferralForUnits(ticket, sourceUnits);
     if (!current && !allowUnassigned) { result = { state: 'not-assigned' }; return tickets; }
@@ -2132,6 +2631,7 @@ async function reassignSupportReferral(ticketId, { targetUnit, note, actor, sour
     };
     ticket.referrals.push(referral);
     ticket.ownerUnit = STAFF_UNITS[targetUnit].label;
+    ticket.ownerUnitId = targetUnit;
     ticket.assignedCaseOwner = actor;
     ticket.status = 'assigned';
     ticket.lastUpdatedAt = now;
@@ -2149,6 +2649,7 @@ function reassignSupportReferralResponse(result, res, req) {
   if (result.state === 'not-found') return res.status(404).json({ error: 'Support ticket not found.' });
   if (result.state === 'not-assigned') return res.status(403).json({ error: 'This case is not currently assigned to one of your functional units.' });
   if (result.state === 'same-unit') return res.status(400).json({ error: 'Choose a different functional unit for reassignment.' });
+  if (result.state === 'restricted-route') return res.status(400).json({ error: 'Sensitive cases may only be reassigned to the Confidential Case Handler or Provost.' });
   sendSupportStudentUpdateEmail(result.ticket, { label: 'Case reassigned', message: `Your case has been reassigned to ${result.referral.targetLabel} for continued action.` }, req).catch(error => console.error('Support reassignment email failed:', error.message));
   return res.json({ ok: true, reference: result.ticket.reference, referral: result.referral });
 }
@@ -2171,14 +2672,14 @@ app.get('/secure/support/:token/evidence/:index', async (req, res) => {
   if (!match || match.forward.status !== 'sent' || new Date(match.forward.expiresAt).getTime() < Date.now()) return res.status(404).send('This confidential support link is invalid or has expired.');
   const evidence = supportEvidenceFor(match.ticket, req.params.index);
   if (!evidence) return res.status(404).send('Evidence file not found.');
-  return sendSupportEvidence(res, evidence);
+  return sendSupportEvidence(req, res, evidence);
 });
 app.get('/secure/support/:token/officer-evidence/:index', async (req, res) => {
   const match = supportForwardForToken(await readSupportTickets(), req.params.token);
   if (!match || match.forward.status !== 'sent' || new Date(match.forward.expiresAt).getTime() < Date.now()) return res.status(404).send('This confidential support link is invalid or has expired.');
   const evidence = supportEvidenceFor(match.ticket, req.params.index, 'officerEvidence');
   if (!evidence) return res.status(404).send('Officer evidence file not found.');
-  return sendSupportEvidence(res, evidence);
+  return sendSupportEvidence(req, res, evidence);
 });
 
 // 1. UNDERGRADUATE PROJECT WORK
@@ -3855,7 +4356,7 @@ app.post('/api/admin/:department/dissertation-assignments/:id/resend', departmen
 
 // Form-based administrator login/logout.
 app.get('/admin-login.html',(_req,res)=>res.sendFile(path.join(__dirname,'public','admin-login.html')));
-app.post('/api/admin-login',async(req,res)=>{
+app.post('/api/admin-login',supportRateLimit(15),async(req,res)=>{
   const department=String(req.body?.department||'').trim(),username=String(req.body?.username||'').trim(),password=String(req.body?.password||'');
   if(!departmentFromSlug(department))return res.status(400).json({error:'Select a valid department.'});
   const identity=await verifyDepartmentCredentials(department,username,password);
@@ -3869,7 +4370,7 @@ app.get('/admin/logout',(req,res)=>{clearAdminSession(req);res.clearCookie('ucc_
 
 // FUNCTIONAL UNITS STAFF PORTAL
 app.get('/staff-login.html',(_req,res)=>res.sendFile(path.join(__dirname,'public','staff-login.html')));
-app.post('/api/staff-login',async(req,res)=>{
+app.post('/api/staff-login',supportRateLimit(15),async(req,res)=>{
   const username=String(req.body?.username||'').trim(),password=String(req.body?.password||'');
   const identity=await verifyStaffCredentials(username,password);
   if(!identity)return res.status(401).json({error:'Invalid username or password, or this account has no functional-unit access.'});
@@ -3888,23 +4389,37 @@ app.get('/api/staff/me',staffAuth,async(req,res)=>{
 });
 function supportDashboardTickets(tickets, unitId) {
   const visible=tickets.filter(ticket=>!ticket.sensitive);
-  if(unitId==='provost') return visible;
+  if(unitId==='provost') return tickets;
+  if(unitId==='confidential-handler') return tickets.filter(ticket=>ticket.sensitive);
+  if(unitId==='student-support'||unitId==='quality-assurance') return visible;
   if(unitId==='college-registrar') return visible.filter(ticket=>['certificate','change-of-name','transcript','incomplete-result'].includes(ticket.categoryKey));
   if(unitId==='college-finance') return visible.filter(ticket=>ticket.categoryKey==='fees-payment');
   if(['directorate-education-business','directorate-arts-stem'].includes(unitId)) return visible.filter(ticket=>['programme-department','assessment-project'].includes(ticket.categoryKey));
-  return [];
+  if(unitId==='coordinator') return visible.filter(ticket=>ticket.originRole==='centre-coordinator');
+  if(unitId==='regional-administrator') return visible.filter(ticket=>ticket.originRole==='centre-coordinator'||(ticket.referrals||[]).some(referral=>referral.targetUnit===unitId));
+  return visible.filter(ticket=>ticket.ownerUnitId===unitId||(ticket.referrals||[]).some(referral=>referral.targetUnit===unitId));
 }
 function supportDashboardSummary(tickets, unitId) {
-  const open=tickets.filter(ticket=>!['resolved','final-decision','closed'].includes(ticket.status));
+  const open=tickets.filter(ticket=>!['resolved','final-decision','closed','accepted'].includes(ticket.status));
+  const completed=tickets.filter(ticket=>['resolved','final-decision','closed','accepted'].includes(ticket.status));
+  const feedback=tickets.map(ticket=>ticket.feedback).filter(item=>item&&Number.isFinite(Number(item.rating)));
   const now=Date.now();
   const countBy=(items,key)=>Object.entries(items.reduce((out,item)=>{const value=key==='status'?(SUPPORT_STATUS_LABELS[item.status]||item.status||'Not recorded'):(item[key]||'Not recorded');out[value]=(out[value]||0)+1;return out;},{})).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([label,count])=>({label,count}));
+  const averageHours=(items,endKey)=>{const values=items.filter(ticket=>ticket[endKey]&&ticket.createdAt).map(ticket=>(new Date(ticket[endKey]).getTime()-new Date(ticket.createdAt).getTime())/3600000).filter(value=>Number.isFinite(value)&&value>=0);return values.length?Number((values.reduce((sum,value)=>sum+value,0)/values.length).toFixed(1)):null;};
+  const auditCount=pattern=>tickets.filter(ticket=>(ticket.auditTrail||[]).some(item=>pattern.test(String(item.action||'')))).length;
   return { unitId, label: STAFF_UNITS[unitId].label, total:tickets.length, open:open.length, resolved:tickets.length-open.length,
     overdue:open.filter(ticket=>ticket.dueAt&&new Date(ticket.dueAt).getTime()<now).length,
+    atRisk:open.filter(ticket=>supportSlaSummary(ticket).atRisk).length,
+    awaitingEvidence:open.filter(ticket=>['evidence-requested','lacks-evidence','awaiting-student'].includes(ticket.status)).length,
+    reopened:auditCount(/reopened/i), appealed:auditCount(/appeal/i), accepted:auditCount(/accepted/i),
+    slaCompliancePercent:completed.length?Number((completed.filter(ticket=>!ticket.slaBreachedAt).length/completed.length*100).toFixed(1)):null,
+    feedbackResponses:feedback.length, averageSatisfaction:feedback.length?Number((feedback.reduce((sum,item)=>sum+Number(item.rating),0)/feedback.length).toFixed(1)):null, lowRatings:feedback.filter(item=>Number(item.rating)<=2).length,
+    averageFirstResponseHours:averageHours(tickets,'firstResponseAt'), averageResolutionHours:averageHours(tickets,'resolvedAt'),
     routed:tickets.filter(ticket=>(ticket.referrals||[]).length).length,
-    categoryBreakdown:countBy(tickets,'categoryLabel'), statusBreakdown:countBy(tickets,'status') };
+    categoryBreakdown:countBy(tickets,'categoryLabel'), statusBreakdown:countBy(tickets,'status'), centreBreakdown:countBy(tickets,'studyCentre') };
 }
 app.get('/api/staff/dashboard', staffAuth, async(req,res)=>{
-  const permitted=['provost','college-registrar','directorate-education-business','directorate-arts-stem','college-finance'];
+  const permitted=Object.keys(STAFF_UNITS).filter(unit=>!['payroll','auditor','stores'].includes(unit));
   const tickets=await readSupportTickets();
   const dashboards=normalizeStaffUnits(req.staffIdentity?.units).filter(unit=>permitted.includes(unit)).map(unit=>supportDashboardSummary(supportDashboardTickets(tickets,unit),unit));
   res.json({ok:true,dashboards});
@@ -3915,15 +4430,16 @@ function staffReferralTicket(ticket) {
     studyLevel: ticket.studyLevelLabel || '', category: ticket.categoryLabel, priority: ticket.priorityLabel,
     status: ticket.status, statusLabel: SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,
     ownerUnit: ticket.ownerUnit, subject: ticket.subject, description: ticket.description, studyCentre: ticket.studyCentre,
-    lastUpdatedAt: ticket.lastUpdatedAt, evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [],
+    lastUpdatedAt: ticket.lastUpdatedAt, dueAt: ticket.dueAt || null, assignedCaseOwner: ticket.assignedCaseOwner || '', sensitive: Boolean(ticket.sensitive), sla: supportSlaSummary(ticket), evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [],
     officerEvidence: Array.isArray(ticket.officerEvidence) ? ticket.officerEvidence : [], referrals: ticket.referrals || [],
-    auditTrail: ticket.auditTrail || []
+    interUnitMessages: ticket.interUnitMessages || [], studentUpdates: ticket.studentUpdates || [], auditTrail: ticket.auditTrail || []
   };
 }
+app.use('/api/staff/referrals', supportSameOrigin);
 app.get('/api/staff/referrals', staffAuth, async(req, res) => {
   const unitIds = normalizeStaffUnits(req.staffIdentity?.units);
   const tickets = await readSupportTickets();
-  const referrals = tickets.filter(ticket => (ticket.referrals || []).some(referral => unitIds.includes(referral.targetUnit)))
+  const referrals = tickets.filter(ticket => (!ticket.sensitive || unitIds.some(unit => ['confidential-handler','provost'].includes(unit))) && ((ticket.referrals || []).some(referral => unitIds.includes(referral.targetUnit)) || (ticket.interUnitMessages || []).some(message => unitIds.includes(message.targetUnit))))
     .sort((a,b) => String(b.lastUpdatedAt || b.createdAt).localeCompare(String(a.lastUpdatedAt || a.createdAt)))
     .map(staffReferralTicket);
   res.json({ ok: true, referrals });
@@ -3932,11 +4448,105 @@ app.get('/api/staff/referrals/:id/:collection/:index', staffAuth, async(req, res
   const collection = req.params.collection === 'officer-evidence' ? 'officerEvidence' : req.params.collection === 'evidence' ? 'evidence' : '';
   if (!collection) return res.status(404).json({ error: 'Evidence file not found.' });
   const unitIds = normalizeStaffUnits(req.staffIdentity?.units);
-  const ticket = (await readSupportTickets()).find(item => item.id === req.params.id && (item.referrals || []).some(referral => unitIds.includes(referral.targetUnit)));
+  const ticket = (await readSupportTickets()).find(item => item.id === req.params.id && (!item.sensitive || unitIds.some(unit => ['confidential-handler','provost'].includes(unit))) && (item.referrals || []).some(referral => unitIds.includes(referral.targetUnit)));
   if (!ticket) return res.status(404).json({ error: 'Referred case not found.' });
   const evidence = supportEvidenceFor(ticket, req.params.index, collection);
   if (!evidence) return res.status(404).json({ error: 'Evidence file not found.' });
-  return sendSupportEvidence(res, evidence);
+  return sendSupportEvidence(req, res, evidence);
+});
+app.post('/api/staff/referrals/:id/officer-evidence', staffAuth, supportUpload.array('evidenceFiles', 10), async (req, res) => {
+  try {
+    if ((ROLE_RANK[req.staffIdentity?.role] || 0) < ROLE_RANK.officer) { await removeUploaded(req).catch(() => {}); return res.status(403).json({ error: 'Your role is read-only.' }); }
+    const unitIds = normalizeStaffUnits(req.staffIdentity?.units);
+    const note = String(req.body?.note || '').trim().slice(0, 2000);
+    if (!Array.isArray(req.files) || !req.files.length) return res.status(400).json({ error: 'Attach at least one evidence file.' });
+    let updated = null;
+    await mutateSupportTickets(tickets => {
+      const ticket = tickets.find(item => item.id === req.params.id && activeReferralForUnits(item, unitIds));
+      if (!ticket || (ticket.sensitive && !unitIds.some(unit => ['confidential-handler','provost'].includes(unit)))) return null;
+      const now = new Date().toISOString();
+      ticket.officerEvidence = Array.isArray(ticket.officerEvidence) ? ticket.officerEvidence : [];
+      ticket.officerEvidence.push(...req.files.map(file => ({ ...fileRecord(file), uploadedAt: now, note, uploadedBy: req.staffIdentity?.name || req.staffIdentity?.username || 'Functional-unit officer' })));
+      ticket.lastUpdatedAt = now;
+      ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
+      ticket.auditTrail.push({ action: 'Officer evidence added', note, at: now, by: req.staffIdentity?.name || req.staffIdentity?.username || 'Functional-unit officer' });
+      updated = { ...ticket };
+      return ticket;
+    });
+    if (!updated) { await removeUploaded(req).catch(() => {}); return res.status(404).json({ error: 'This case is not currently assigned to your unit.' }); }
+    return res.json({ ok: true, evidenceCount: updated.officerEvidence.length });
+  } catch (error) { console.error('Functional-unit evidence upload failed:', error); await removeUploaded(req).catch(() => {}); return res.status(500).json({ error: 'Officer evidence could not be uploaded.' }); }
+});
+app.patch('/api/staff/referrals/:id', staffAuth, async (req, res) => {
+  if ((ROLE_RANK[req.staffIdentity?.role] || 0) < ROLE_RANK.officer) return res.status(403).json({ error: 'Your role is read-only.' });
+  const action = String(req.body?.action || '').trim();
+  const note = String(req.body?.note || '').trim().slice(0, 4000);
+  const assignedCaseOwner = cleanHumanText(req.body?.assignedCaseOwner || req.staffIdentity?.name || req.staffIdentity?.username).slice(0, 180);
+  const allowed = new Set(['accept','internal-note','progress','request-evidence','resolve','final-decision','return-to-support']);
+  if (!allowed.has(action) || !note) return res.status(400).json({ error: 'Choose a valid action and provide a clear case note.' });
+  const unitIds = normalizeStaffUnits(req.staffIdentity?.units);
+  const monitoringOnly = unitIds.length > 0 && unitIds.every(unit => ['coordinator','regional-administrator','quality-assurance'].includes(unit));
+  if (monitoringOnly && action !== 'internal-note') return res.status(403).json({ error: 'This monitoring role may add evidence, record internal notes, and escalate by reassignment, but may not issue operational case decisions.' });
+  let updated = null;
+  await mutateSupportTickets(tickets => {
+    const ticket = tickets.find(item => item.id === req.params.id);
+    const referral = ticket ? activeReferralForUnits(ticket, unitIds) : null;
+    if (!ticket || !referral || (ticket.sensitive && !unitIds.some(unit => ['confidential-handler','provost'].includes(unit)))) return tickets;
+    const now = new Date().toISOString();
+    const actor = req.staffIdentity?.name || req.staffIdentity?.username || 'Functional-unit officer';
+    ticket.assignedCaseOwner = assignedCaseOwner || actor;
+    ticket.firstResponseAt = ticket.firstResponseAt || now;
+    ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
+    ticket.studentUpdates = Array.isArray(ticket.studentUpdates) ? ticket.studentUpdates : [];
+    if (action === 'internal-note') {
+      ticket.auditTrail.push({ action: 'Internal case note added', note, at: now, by: actor });
+    } else if (action === 'accept') {
+      referral.status = 'accepted';
+      referral.acceptedAt = now;
+      referral.acceptedBy = actor;
+      ticket.status = 'assigned';
+      ticket.auditTrail.push({ action: 'Referral accepted by receiving unit', note, at: now, by: actor });
+      ticket.studentUpdates.push({ label: 'Assigned to responsible unit', message: `${referral.targetLabel} has accepted the case for action.`, at: now });
+    } else if (action === 'progress') {
+      ticket.status = 'investigation-ongoing';
+      if (ticket.slaPausedAt) supportResumeSla(ticket);
+      ticket.auditTrail.push({ action: 'Investigation update recorded', note, at: now, by: actor });
+      ticket.studentUpdates.push({ label: 'Investigation ongoing', message: note, at: now });
+    } else if (action === 'request-evidence') {
+      ticket.status = 'evidence-requested';
+      supportPauseSla(ticket, note);
+      ticket.auditTrail.push({ action: 'Additional evidence requested from student', note, at: now, by: actor });
+      ticket.studentUpdates.push({ label: 'Additional evidence requested', message: note, at: now });
+    } else if (action === 'resolve' || action === 'final-decision') {
+      ticket.status = action === 'resolve' ? 'resolved' : 'final-decision';
+      ticket.resolution = note;
+      ticket.resolvedAt = now;
+      ticket.resolvedBy = actor;
+      ticket.studentResponseDueAt = supportMoveWorkingDays(now, 5);
+      referral.status = 'resolved';
+      referral.resolvedAt = now;
+      ticket.auditTrail.push({ action: action === 'resolve' ? 'Resolution proposed' : 'Final decision issued', note, at: now, by: actor });
+      ticket.studentUpdates.push({ label: action === 'resolve' ? 'Resolution proposed' : 'Final decision issued', message: note, at: now });
+    } else {
+      referral.status = 'returned-to-support';
+      referral.returnedAt = now;
+      ticket.status = 'assigned';
+      ticket.ownerUnitId = 'student-support';
+      ticket.ownerUnit = STAFF_UNITS['student-support'].label;
+      ticket.referrals.push({ id: crypto.randomUUID(), sourceUnit: referral.targetUnit, sourceLabel: referral.targetLabel, targetUnit: 'student-support', targetLabel: STAFF_UNITS['student-support'].label, status: 'assigned', origin: 'returned-to-support', comment: note, createdAt: now, reassignmentHistory: [] });
+      ticket.auditTrail.push({ action: 'Case returned to Student Support Services', note, at: now, by: actor });
+      ticket.studentUpdates.push({ label: 'Returned to Student Support Services', message: 'The responsible unit has returned the case to Student Support Services for continued action.', at: now });
+    }
+    ticket.lastUpdatedAt = now;
+    updated = { ...ticket };
+    return ticket;
+  });
+  if (!updated) return res.status(404).json({ error: 'This case is not currently assigned to your unit.' });
+  if (action !== 'internal-note') {
+    const studentMessage = updated.studentUpdates?.[updated.studentUpdates.length - 1];
+    sendSupportStudentUpdateEmail(updated, studentMessage || { label: 'Case updated', message: note }, req).catch(error => console.error('Functional-unit update email failed:', error.message));
+  }
+  return res.json({ ok: true, ticket: staffReferralTicket(updated) });
 });
 app.post('/api/staff/referrals/:id/reassign', staffAuth, async(req, res) => {
   if ((ROLE_RANK[req.staffIdentity?.role] || 0) < ROLE_RANK.officer) return res.status(403).json({ error: 'Your staff role is read-only. An officer or administrator must reassign a case.' });
@@ -4538,8 +5148,110 @@ app.use((err,req,res,_next)=>{
   if(err instanceof multer.MulterError)return res.status(400).json({error:err.code==='LIMIT_FILE_SIZE'?'A file exceeds the 100 MB server limit.':err.message});
   res.status(500).json({error:'Unexpected server error.'});
 });
+
+async function supportLifecycleRecipients(ticket) {
+  const accounts = (await readAdminUsers()).filter(account => account.active !== false && (ROLE_RANK[account.role] || 0) >= ROLE_RANK.officer && isEmail(account.email));
+  const units = ticket.sensitive
+    ? new Set([ticket.ownerUnitId || 'confidential-handler', 'provost'])
+    : new Set([ticket.ownerUnitId || 'student-support', 'student-support']);
+  const matching = accounts.filter(account => normalizeStaffUnits(account.units).some(unit => units.has(unit)));
+  const administrators = matching.filter(account => account.role === 'administrator');
+  const selected = administrators.length ? administrators : matching;
+  return [...new Set(selected.map(account => String(account.email).trim().toLowerCase()))].filter(email => supportEmailsAreInstitutional([email]));
+}
+function supportLifecycleEmail(ticket, type) {
+  const isBreach = type === 'sla-breach';
+  const heading = isBreach ? 'Student Support SLA breach' : 'Student Support SLA warning';
+  const action = isBreach ? 'The resolution target has been exceeded. Unit-head and Student Support follow-up are required.' : 'The resolution target is within one working day. Confirm the next action and update the student.';
+  const portalLink = PUBLIC_BASE_URL ? `<p><a href="${htmlEscape(`${PUBLIC_BASE_URL}/staff`)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:11px 16px;border-radius:7px;font-weight:bold">Open staff workspace</a></p>` : '';
+  return { subject:`${isBreach ? 'Overdue' : 'Due soon'}: ${ticket.reference}`, html:`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">${heading}</h2><p><strong>Reference:</strong> ${htmlEscape(ticket.reference)}<br><strong>Category:</strong> ${htmlEscape(ticket.categoryLabel)}<br><strong>Responsible unit:</strong> ${htmlEscape(ticket.ownerUnit)}<br><strong>Target:</strong> ${htmlEscape(new Date(ticket.dueAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'}))} UTC</p><p>${action}</p>${portalLink}<p>Do not forward case details outside authorised institutional channels.</p></div></body></html>` };
+}
+async function dispatchSupportLifecycleNotifications() {
+  if (!gmailConfigured()) return;
+  const tickets = await readSupportTickets();
+  const candidates = [];
+  for (const ticket of tickets) {
+    const eligible = type => { const state=ticket.notificationState?.[type]; return !state?.sentAt && Number(state?.attempts || 0) < 3 && (!state?.lastAttemptAt || Date.now() - new Date(state.lastAttemptAt).getTime() >= 60 * 60 * 1000); };
+    if (ticket.slaWarningAt && eligible('sla-warning')) candidates.push({ ticketId:ticket.id, type:'sla-warning' });
+    if (ticket.slaBreachedAt && eligible('sla-breach')) candidates.push({ ticketId:ticket.id, type:'sla-breach' });
+    if (ticket.slaPausedAt && supportElapsedWorkingDays(ticket.slaPausedAt) >= SUPPORT_EVIDENCE_REMINDER_WORKING_DAYS && eligible('evidence-reminder')) candidates.push({ ticketId:ticket.id, type:'evidence-reminder' });
+  }
+  for (const candidate of candidates) {
+    let claimed = null;
+    await mutateSupportTickets(list => {
+      const ticket = list.find(item => item.id === candidate.ticketId);
+      if (!ticket) return list;
+      ticket.notificationState = ticket.notificationState || {};
+      const state = ticket.notificationState[candidate.type] || { attempts:0 };
+      const retryReady = !state.lastAttemptAt || Date.now() - new Date(state.lastAttemptAt).getTime() >= 60 * 60 * 1000;
+      if (state.sentAt || state.attempts >= 3 || !retryReady) return list;
+      state.attempts += 1;
+      state.lastAttemptAt = new Date().toISOString();
+      state.status = 'sending';
+      ticket.notificationState[candidate.type] = state;
+      claimed = JSON.parse(JSON.stringify(ticket));
+      return list;
+    });
+    if (!claimed) continue;
+    try {
+      if (candidate.type === 'evidence-reminder') {
+        if (!isEmail(claimed.email)) throw new Error('Student email is unavailable.');
+        const statusUrl = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}/support-track.html?token=${encodeURIComponent(supportStatusToken(claimed))}` : '';
+        const link = statusUrl ? `<p><a href="${htmlEscape(statusUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:11px 16px;border-radius:7px;font-weight:bold">Respond to this ticket</a></p>` : '';
+        await sendGmailHtmlEmail({ to:claimed.email, subject:`Information still required - ${claimed.reference}`, html:`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Your response is still needed</h2><p>Dear ${htmlEscape(claimed.name || 'Student')},</p><p>The responsible unit is waiting for the information requested on ticket <strong>${htmlEscape(claimed.reference)}</strong>.</p><p>${htmlEscape(claimed.slaPauseReason || 'Please review the ticket and provide the requested evidence.')}</p>${link}<p>The service target remains paused until your response is received.</p></div></body></html>` });
+      } else {
+        const recipients = await supportLifecycleRecipients(claimed);
+        if (!recipients.length) throw new Error('No eligible institutional escalation recipient is assigned.');
+        const email = supportLifecycleEmail(claimed, candidate.type);
+        await Promise.all(recipients.map(to => sendGmailHtmlEmail({ to, subject:email.subject, html:email.html })));
+      }
+      await mutateSupportTickets(list => { const ticket=list.find(item=>item.id===candidate.ticketId); const state=ticket?.notificationState?.[candidate.type]; if(state){state.status='sent';state.sentAt=new Date().toISOString();delete state.error;} return list; });
+    } catch (error) {
+      await mutateSupportTickets(list => { const ticket=list.find(item=>item.id===candidate.ticketId); const state=ticket?.notificationState?.[candidate.type]; if(state){state.status='failed';state.error=String(error.message||'Delivery failed').slice(0,300);} return list; });
+      console.error(`Support ${candidate.type} notification failed:`, error.message);
+    }
+  }
+}
+
+async function refreshSupportLifecycle() {
+  await mutateSupportTickets(tickets => {
+    const now = Date.now();
+    const terminal = new Set(['accepted','closed']);
+    for (const ticket of tickets) {
+      ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
+      ticket.studentUpdates = Array.isArray(ticket.studentUpdates) ? ticket.studentUpdates : [];
+      if (['resolved','final-decision'].includes(ticket.status) && ticket.studentResponseDueAt && new Date(ticket.studentResponseDueAt).getTime() <= now) {
+        const at = new Date().toISOString();
+        ticket.status = 'closed';
+        ticket.closedAt = at;
+        ticket.lastUpdatedAt = at;
+        ticket.auditTrail.push({ action: 'Response period ended and case closed', note: 'The student may still submit an appeal.', at, by: 'System' });
+        ticket.studentUpdates.push({ label: 'Case closed', message: 'The response period has ended. You may still submit an appeal if the decision remains disputed.', at });
+        continue;
+      }
+      if (terminal.has(ticket.status) || ticket.slaPausedAt || !ticket.dueAt) continue;
+      const sla = supportSlaSummary(ticket);
+      const at = new Date().toISOString();
+      if (sla.overdue && !ticket.slaBreachedAt) {
+        ticket.slaBreachedAt = at;
+        ticket.lastUpdatedAt = at;
+        ticket.auditTrail.push({ action: 'SLA escalation triggered', note: 'Resolution target exceeded; unit-head and Student Support follow-up required.', at, by: 'System' });
+      } else if (sla.atRisk && !ticket.slaWarningAt) {
+        ticket.slaWarningAt = at;
+        ticket.lastUpdatedAt = at;
+        ticket.auditTrail.push({ action: 'SLA warning triggered', note: 'Resolution target is within one working day.', at, by: 'System' });
+      }
+    }
+    return tickets;
+  });
+  await dispatchSupportLifecycleNotifications();
+}
+
+const supportLifecycleTimer = setInterval(() => refreshSupportLifecycle().catch(error => console.error('Support lifecycle refresh failed:', error.message)), 15 * 60 * 1000);
+supportLifecycleTimer.unref();
 app.listen(PORT,'0.0.0.0',()=>{
   console.log(`UCC submission portals listening on ${PORT}`);
+  refreshSupportLifecycle().catch(error => console.error('Initial support lifecycle refresh failed:', error.message));
   for (const [slug, dept] of Object.entries(DEPARTMENTS)) {
     if (dept.password === 'change-this-password') console.warn(`WARNING: Set a secure admin password for ${slug}.`);
   }

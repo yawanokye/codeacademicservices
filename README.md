@@ -1,3 +1,25 @@
+# v34 update: Priority 2 Student Support service quality
+
+- Category-specific preparation guidance now explains expected evidence, responsible unit and standard target before submission.
+- Automated lifecycle processing records SLA warnings and breach escalations and, when email is configured, notifies authorised institutional recipients.
+- Students awaiting evidence receive a configurable reminder, and accepted or closed cases can submit service feedback.
+- Leadership dashboards include SLA compliance, satisfaction, feedback-response and low-rating indicators.
+- Student Support can export the filtered queue safely to CSV and use editable response templates.
+- Accessibility, keyboard focus, mobile wrapping and the deployment environment example were improved.
+
+See `PATCH_NOTES_v34.txt` for the complete Priority 2 change list and deployment settings.
+
+# v33 update: complete Student Support Services workflow
+
+- Students receive a permanent reference, can securely track a case, add evidence, accept a resolution, reopen it during the response window, or appeal.
+- Student Support has a searchable, filtered and paginated triage queue with controlled classification, priority, ownership and officer assignment.
+- Receiving functional units can accept, investigate, request evidence, attach officer records, resolve, issue a final decision, return or reassign a case.
+- Sensitive complaints use a restricted Confidential Case Handler route and Provost oversight instead of ordinary unit routing.
+- Working-day SLAs now support warning/breach flags, evidence pauses, resumption, response windows and leadership service-level dashboards.
+- Student Support tickets use SQLite persistence with a JSON compatibility snapshot, signed tracking links, institutional unit routing and stronger request protections.
+
+See `PATCH_NOTES_v33.txt` for deployment variables and the complete change list.
+
 # v32 update: central operations access, activity filtering and compact layouts
 
 - Payroll and Auditor links have been removed from the Department chooser and Department Administration header. The Developer Portal now contains a dedicated **Payroll & Auditor** tab for direct, passwordless operations access.

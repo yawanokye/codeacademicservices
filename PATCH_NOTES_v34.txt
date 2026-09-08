@@ -1,0 +1,53 @@
+CoDE Academic Services v34 - Priority 2 Student Support upgrade
+===============================================================
+
+This release builds on the complete v33 case workflow with proactive service management, student guidance, quality feedback, exports and accessibility improvements.
+
+Proactive service management
+----------------------------
+- The lifecycle service records a one-working-day SLA warning and an overdue breach escalation.
+- When Gmail is configured, warning and breach notices are sent to eligible institutional unit administrators, with officer fallback when no administrator is assigned.
+- Sensitive-case escalations are limited to the restricted owner and Provost pathway.
+- Students waiting to provide evidence receive a reminder after a configurable number of working days.
+- Notification delivery is recorded with bounded retries; cases are not repeatedly emailed after successful delivery.
+- Student Support officers can manually refresh lifecycle flags from the queue.
+
+Student guidance and feedback
+-----------------------------
+- Each category now shows preparation guidance, suggested evidence, responsible unit and the standard working-day target before submission.
+- Closed or accepted cases offer a short 1-5 service rating and resolved/partly/not-resolved question.
+- Low ratings require a brief explanation so the feedback is actionable.
+- Feedback is tied to the permanent ticket and retained in the case audit history.
+
+Quality monitoring and case operations
+--------------------------------------
+- Leadership dashboards now include SLA compliance, feedback response count, average rating and low-rating count.
+- Student Support can export the currently filtered permitted queue as CSV.
+- CSV output protects spreadsheet users against formula injection.
+- Student Support officers can insert clear evidence, investigation, delay and resolution message templates, then adapt them before sending.
+
+Accessibility and deployment readiness
+--------------------------------------
+- Increased operational label and control sizes, 44-pixel control targets, stronger keyboard focus and reduced-motion support.
+- Student tracking and feedback layouts wrap safely on small screens.
+- The environment-variable example now matches the actual CoDE Academic Services application and includes all Student Support controls.
+
+New optional environment variable
+---------------------------------
+- SUPPORT_EVIDENCE_REMINDER_WORKING_DAYS: working days before an awaiting-evidence reminder is sent. Default: 3.
+
+Existing required production configuration
+------------------------------------------
+- Set PUBLIC_BASE_URL for links in automated emails.
+- Set SUPPORT_STATUS_TOKEN_SECRET to a separate long random value.
+- Configure active institutional staff accounts for each receiving unit.
+- Configure the Gmail API variables to enable acknowledgements, case updates, evidence reminders and SLA escalation emails.
+
+Validation
+----------
+- Server and browser JavaScript syntax validation.
+- Full dependency audit.
+- Student feedback authentication, validation and persistence tests.
+- Filtered CSV export and spreadsheet-injection protection tests.
+- SLA lifecycle warning and breach audit tests.
+- Regression of create, triage, refer, receive, request evidence, resume, resolve, accept/reopen/appeal and restricted-case behavior.

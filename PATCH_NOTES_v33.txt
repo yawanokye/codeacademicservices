@@ -1,0 +1,53 @@
+CoDE Academic Services v33 - Student Support Services workflow upgrade
+=====================================================================
+
+This release turns the Student Support feature into a complete, role-aware case workflow while preserving the existing submissions, claims, department, payroll and audit features.
+
+Student experience
+------------------
+- Guided complaint/service intake with category-specific evidence advice.
+- Official study-centre and academic-department choices loaded from the portal configuration.
+- Permanent case reference, duplicate-open-case warning and secure email tracking link.
+- Mobile tracking remains visible and usable.
+- Students can add messages/evidence throughout an open case.
+- Students can accept a resolution, reopen it within the response window, or appeal to a higher authority.
+- Sensitive complaints are registered directly in the restricted Confidential Case Handler workspace.
+
+Case management
+---------------
+- Search, filters and pagination for the Student Support queue.
+- Controlled category, priority, owner-unit, officer and status fields.
+- Receiving units can accept, investigate, request evidence, attach officer evidence, resolve, issue a final decision, return or reassign a case.
+- Forwarding and inter-unit requests use active staff-unit accounts; arbitrary destination email entry was removed.
+- Every referral retains the same permanent reference and complete reassignment/audit history.
+- Word, Excel, PDF, image and text evidence can be previewed; the original file remains downloadable.
+
+Service levels and oversight
+----------------------------
+- Working-day resolution targets, optional holiday exclusions, assignment target, warning/breach flags and evidence pause/resume.
+- Category targets are applied; sensitive and urgent matters use shorter targets.
+- Resolved cases provide a five-working-day response window and then close automatically while preserving appeal access.
+- Leadership dashboards show open, resolved, overdue, at-risk, evidence-waiting, reopened and appealed counts, response/resolution averages, and category/status/centre breakdowns.
+- Provost oversight includes restricted-case aggregates; operational access remains role-restricted.
+
+Security and persistence
+------------------------
+- SQLite is the primary Student Support ticket store, with a JSON compatibility snapshot after each update.
+- Same-origin checks protect staff case mutations; login and public case endpoints are rate-limited.
+- Tracking URLs use signed tokens and do not place student email addresses in URL query strings.
+- Security headers, institutional routing-domain checks and restricted evidence access were added.
+- Multer was upgraded to the current 2.x line. SheetJS was upgraded from the outdated npm-registry build to the official 0.20.3 distribution, and the patched `qs` release is enforced.
+
+New optional environment variables
+----------------------------------
+- SUPPORT_STATUS_TOKEN_SECRET: long random secret used to sign student tracking links. Set this in production.
+- SUPPORT_ALLOWED_EMAIL_DOMAINS: comma-separated institutional domains allowed for routed case notifications. Default: ucc.edu.gh
+- SUPPORT_HOLIDAYS: comma-separated YYYY-MM-DD dates excluded from working-day targets.
+- SUPPORT_DB_FILE: optional path for the Student Support SQLite database. Defaults inside STORAGE_DIR.
+
+Validation completed
+--------------------
+- JavaScript syntax checks across the server and all major portal scripts.
+- End-to-end API test: create, triage, forward, receiving-unit acceptance, evidence request, SLA pause, student response, SLA resume, resolution and student reopen.
+- Restricted-case test: confidential ownership, blocked routing to an unauthorised unit and Provost aggregate visibility.
+- Dependency audit: 0 known vulnerabilities after installing the locked production dependency tree.
