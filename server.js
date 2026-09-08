@@ -194,11 +194,13 @@ const ADMIN_ROLES = new Set(['viewer','officer','administrator']);
 const ROLE_RANK = { viewer:1, officer:2, administrator:3 };
 const STAFF_UNITS = Object.freeze({
   'student-support': { label: 'Student Support Services Unit', summary: 'Triage complaints and service requests, communicate with students, and forward matters with comments.' },
+  'general-office': { label: 'General Office', summary: 'Receive transcript requests and general administrative service matters.' },
   'student-records': { label: 'Student Records Management Unit', summary: 'Receive and process assigned records matters. Official records remain controlled through approved UCC systems.' },
   'college-registrar': { label: 'College Registrar', summary: 'Handle registrar matters, certificates, name changes and escalated service requests.' },
   'provost': { label: 'Provost', summary: 'Read-only oversight of service performance, sensitive escalation and institutional trends.' },
   'directorate-education-business': { label: 'Directorate of Education and Business Studies', summary: 'Academic oversight for Education and Business programmes.' },
   'directorate-arts-stem': { label: 'Directorate of Arts and STEM Studies', summary: 'Academic oversight for Arts, Social Sciences, STEM and ICT programmes.' },
+  'academic-departments': { label: 'Academic Departments', summary: 'Receive programme, assessment, project-work, teaching-practice and departmental academic matters.' },
   'examinations': { label: 'Examinations Unit', summary: 'Process examination-related matters and support controlled results workflows.' },
   'payroll': { label: 'Payroll Portal', summary: 'Process only department-approved claims for payment.' },
   'auditor': { label: "Auditor's Portal", summary: 'Read-only verification of payroll-approved or paid claims.' },
@@ -1751,15 +1753,15 @@ async function saveRecord(record) {
 }
 
 const SUPPORT_CATEGORIES = Object.freeze({
-  'incomplete-result': { label: 'Incomplete result', owner: 'Student Records Management Unit', support: 'Examinations Section', days: 10 },
-  'fees-payment': { label: 'Fees or payment issue', owner: 'Students Finance / Accounts', support: 'College Finance Officer', days: 5 },
-  'certificate': { label: 'Certificate issue', owner: 'College Registrar', support: 'Student Records Management Unit', days: 10 },
-  'change-of-name': { label: 'Change of name', owner: 'College Registrar', support: 'Student Records Management Unit', days: 10 },
-  'transcript': { label: 'Transcript request', owner: 'General Office', support: 'College Registrar / Student Records Management Unit', days: 10 },
-  'change-study-centre': { label: 'Change of study centre', owner: 'Responsible College Office', support: 'Centre Coordinator / Regional Administrator', days: 10 },
-  'centre-transit': { label: 'Transit between centres', owner: 'Responsible College Office', support: 'Centre Coordinator / Regional Administrator / Student Records Management Unit', days: 10 },
-  'programme-department': { label: 'Programme or departmental issue', owner: 'Relevant Department', support: 'Director / College Registrar', days: 10 },
-  'assessment-project': { label: 'Assessment or project-work issue', owner: 'Relevant Department', support: 'Examinations / Student Records Management Unit', days: 10 },
+  'incomplete-result': { label: 'Incomplete result', owner: 'Student Records Management Unit', support: 'Examinations Section', suggestedUnit: 'student-records', days: 10 },
+  'fees-payment': { label: 'Fees or payment issue', owner: 'College Finance Officer', support: 'College Finance Officer', suggestedUnit: 'college-finance', days: 5 },
+  'certificate': { label: 'Certificate issue', owner: 'College Registrar', support: 'Student Records Management Unit', suggestedUnit: 'college-registrar', days: 10 },
+  'change-of-name': { label: 'Change of name', owner: 'College Registrar', support: 'Student Records Management Unit', suggestedUnit: 'college-registrar', days: 10 },
+  'transcript': { label: 'Transcript request', owner: 'General Office', support: 'College Registrar / Student Records Management Unit', suggestedUnit: 'general-office', days: 10 },
+  'change-study-centre': { label: 'Change of study centre', owner: 'Student Support Services Unit', support: 'Student Support Services Unit', suggestedUnit: 'student-support', days: 10 },
+  'centre-transit': { label: 'Transit between centres', owner: 'Student Support Services Unit', support: 'Student Support Services Unit', suggestedUnit: 'student-support', days: 10 },
+  'programme-department': { label: 'Programme or departmental issue', owner: 'Academic Departments', support: 'Director / College Registrar', suggestedUnit: 'academic-departments', days: 10 },
+  'assessment-project': { label: 'Assessment or project-work issue', owner: 'Academic Departments', support: 'Examinations / Student Records Management Unit', suggestedUnit: 'academic-departments', days: 10 },
   'general': { label: 'General or unclassified complaint', owner: 'Student Support Services', support: 'Responsible unit after screening', days: 10 },
   'sensitive': { label: 'Sensitive complaint', owner: 'Confidential Handler', support: 'Provost or designated authority', days: 2 }
 });
@@ -1854,12 +1856,12 @@ app.post('/api/support/tickets', supportUpload.array('evidenceFiles', 10), async
       subject: payload.subject, description: payload.description,
       evidence: Array.isArray(req.files) ? req.files.map(fileRecord) : [],
       sensitive: payload.sensitive, originRole: cleanHumanText(req.body?.originRole).slice(0, 80) || 'student',
-      ownerUnit: payload.category.owner, supportUnit: payload.category.support,
+      ownerUnit: 'Student Support Services Unit', intendedUnit: payload.category.owner, supportUnit: 'Student Support Services Unit',
       status: 'received', resolution: '', createdAt: now, acknowledgedAt: now,
       lastUpdatedAt: now, dueAt: supportDateFromHours(payload.priority.hours),
       auditTrail: [{ action: 'Ticket received', at: now, by: 'Student Support Services' }],
       studentUpdates: [{ label: 'Ticket received', message: 'Your matter has been received by Student Support Services and is awaiting screening.', at: now }],
-      officerEvidence: [], interUnitMessages: []
+      officerEvidence: [], referrals: [], interUnitMessages: []
     };
     await mutateSupportTickets(tickets => { tickets.push(ticket); return ticket; });
     sendSupportAcknowledgementEmail(ticket, req).catch(error => console.error('Support acknowledgement email failed:', error.message));
@@ -1917,8 +1919,8 @@ app.get('/api/support/admin/tickets', supportWorkspaceAuth, async (_req, res) =>
   const tickets = await readSupportTickets();
   res.json({ ok: true, tickets: tickets.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).map(ticket => ({
     id: ticket.id, reference: ticket.reference, name: ticket.name, email: ticket.email, type: ticket.type, studyLevel: ticket.studyLevelLabel || '',
-    category: ticket.categoryLabel, priority: ticket.priorityLabel, status: ticket.status, statusLabel: SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,
-    ownerUnit: ticket.ownerUnit, supportUnit: ticket.supportUnit, studyCentre: ticket.studyCentre, subject: ticket.subject,
+    categoryKey: ticket.categoryKey, category: ticket.categoryLabel, priority: ticket.priorityLabel, status: ticket.status, statusLabel: SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,
+    ownerUnit: ticket.ownerUnit, intendedUnit: ticket.intendedUnit || '', supportUnit: ticket.supportUnit, studyCentre: ticket.studyCentre, subject: ticket.subject,
     description: ticket.description, originRole: ticket.originRole, sensitive: ticket.sensitive, createdAt: ticket.createdAt,
     dueAt: ticket.dueAt, lastUpdatedAt: ticket.lastUpdatedAt, resolution: ticket.resolution || '', auditTrail: ticket.auditTrail || [], studentUpdates:ticket.studentUpdates||[], evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [], officerEvidence:Array.isArray(ticket.officerEvidence)?ticket.officerEvidence:[], forwardHistory: ticket.forwardHistory || [], referrals: ticket.referrals || [], interUnitMessages:ticket.interUnitMessages||[]
   })) });
@@ -2060,6 +2062,8 @@ app.post('/api/support/admin/tickets/:id/forward', supportWorkspaceAuth, require
     ticket.referrals = Array.isArray(ticket.referrals) ? ticket.referrals : [];
     ticket.referrals.push({ id: forwardId, sourceUnit: 'student-support', sourceLabel: STAFF_UNITS['student-support'].label, targetUnit: recipientUnit, targetLabel: STAFF_UNITS[recipientUnit].label, officeName, officeEmail, comment, status: 'registered', createdAt: now, reassignmentHistory: [] });
     ticket.ownerUnit = STAFF_UNITS[recipientUnit].label;
+    ticket.supportUnit = STAFF_UNITS['student-support'].label;
+    ticket.supportFollowUp = true;
     ticket.assignedCaseOwner = req.supportIdentity?.name || 'Student Support Services';
     ticket.status = 'assigned';
     ticket.lastUpdatedAt = now;
@@ -3881,6 +3885,29 @@ app.get('/api/staff/me',staffAuth,async(req,res)=>{
   const tickets=await readSupportTickets();
   const supportCount=units.some(unit=>unit.id==='student-support')?tickets.filter(ticket=>!['resolved','closed'].includes(ticket.status)).length:0;
   res.json({ok:true,staff:{name:identity.name||identity.username,username:identity.username,role:identity.role,units,departments:normalizeAdminDepartments(identity.departments),sections:normalizeAdminSections(identity.sections)},metrics:{openSupportTickets:supportCount}});
+});
+function supportDashboardTickets(tickets, unitId) {
+  const visible=tickets.filter(ticket=>!ticket.sensitive);
+  if(unitId==='provost') return visible;
+  if(unitId==='college-registrar') return visible.filter(ticket=>['certificate','change-of-name','transcript','incomplete-result'].includes(ticket.categoryKey));
+  if(unitId==='college-finance') return visible.filter(ticket=>ticket.categoryKey==='fees-payment');
+  if(['directorate-education-business','directorate-arts-stem'].includes(unitId)) return visible.filter(ticket=>['programme-department','assessment-project'].includes(ticket.categoryKey));
+  return [];
+}
+function supportDashboardSummary(tickets, unitId) {
+  const open=tickets.filter(ticket=>!['resolved','final-decision','closed'].includes(ticket.status));
+  const now=Date.now();
+  const countBy=(items,key)=>Object.entries(items.reduce((out,item)=>{const value=key==='status'?(SUPPORT_STATUS_LABELS[item.status]||item.status||'Not recorded'):(item[key]||'Not recorded');out[value]=(out[value]||0)+1;return out;},{})).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([label,count])=>({label,count}));
+  return { unitId, label: STAFF_UNITS[unitId].label, total:tickets.length, open:open.length, resolved:tickets.length-open.length,
+    overdue:open.filter(ticket=>ticket.dueAt&&new Date(ticket.dueAt).getTime()<now).length,
+    routed:tickets.filter(ticket=>(ticket.referrals||[]).length).length,
+    categoryBreakdown:countBy(tickets,'categoryLabel'), statusBreakdown:countBy(tickets,'status') };
+}
+app.get('/api/staff/dashboard', staffAuth, async(req,res)=>{
+  const permitted=['provost','college-registrar','directorate-education-business','directorate-arts-stem','college-finance'];
+  const tickets=await readSupportTickets();
+  const dashboards=normalizeStaffUnits(req.staffIdentity?.units).filter(unit=>permitted.includes(unit)).map(unit=>supportDashboardSummary(supportDashboardTickets(tickets,unit),unit));
+  res.json({ok:true,dashboards});
 });
 function staffReferralTicket(ticket) {
   return {
