@@ -1792,8 +1792,10 @@ function supportPublicTicket(ticket) {
     dueAt: ticket.dueAt,
     lastUpdatedAt: ticket.lastUpdatedAt,
     studentResponseDueAt: ticket.studentResponseDueAt || null,
-    resolution: ticket.status === 'resolved' || ticket.status === 'closed' ? ticket.resolution || '' : '',
-    evidenceCount: Array.isArray(ticket.evidence) ? ticket.evidence.length : 0
+    resolution: ['resolved','closed','final-decision'].includes(ticket.status) ? ticket.resolution || '' : '',
+    evidenceCount: Array.isArray(ticket.evidence) ? ticket.evidence.length : 0,
+    needsEvidence: ['evidence-requested','lacks-evidence'].includes(ticket.status),
+    updates: (ticket.studentUpdates || []).slice(-12)
   };
 }
 function supportTicketPayload(req) {
@@ -1818,9 +1820,18 @@ function supportTicketPayload(req) {
 }
 async function sendSupportAcknowledgementEmail(ticket, req) {
   if (!isEmail(ticket.email) || !gmailConfigured()) return;
-  const statusUrl = `${baseUrlFor(req)}/student-support.html?reference=${encodeURIComponent(ticket.reference)}&email=${encodeURIComponent(ticket.email)}`;
+  const statusUrl = `${baseUrlFor(req)}/support-track.html?reference=${encodeURIComponent(ticket.reference)}&email=${encodeURIComponent(ticket.email)}`;
   const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">CoDE Academic Services Portal acknowledgement</h2><p>Dear ${htmlEscape(ticket.name || 'Student')},</p><p>Your ${ticket.type === 'service-request' ? 'service request' : 'complaint'} has been received by Student Support Services.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #d4a72c"><strong>Reference:</strong> ${htmlEscape(ticket.reference)}<br><strong>Category:</strong> ${htmlEscape(ticket.categoryLabel)}<br><strong>Responsible unit:</strong> ${htmlEscape(ticket.ownerUnit)}<br><strong>Target response:</strong> ${htmlEscape(new Date(ticket.dueAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'}))} UTC</div><p><a href="${htmlEscape(statusUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Track this ticket</a></p><p>Please quote the reference in any follow-up communication.</p><p>Regards,<br>Student Support Services<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
   await sendGmailHtmlEmail({to: ticket.email, subject: `Support ticket received - ${ticket.reference}`, html});
+}
+async function sendSupportStudentUpdateEmail(ticket, update, req) {
+  if (!isEmail(ticket.email) || !gmailConfigured()) return;
+  const statusUrl = `${baseUrlFor(req)}/support-track.html?reference=${encodeURIComponent(ticket.reference)}&email=${encodeURIComponent(ticket.email)}`;
+  const final = ['resolved','closed','final-decision'].includes(ticket.status);
+  const subject = final ? `Final decision on your support ticket - ${ticket.reference}` : `Update on your support ticket - ${ticket.reference}`;
+  const heading = final ? 'Final decision recorded' : 'Your support ticket has been updated';
+  const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">${heading}</h2><p>Dear ${htmlEscape(ticket.name || 'Student')},</p><p>Student Support Services has updated your ${ticket.type === 'service-request' ? 'service request' : 'complaint'}.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #d4a72c"><strong>Reference:</strong> ${htmlEscape(ticket.reference)}<br><strong>Current stage:</strong> ${htmlEscape(SUPPORT_STATUS_LABELS[ticket.status] || ticket.status)}<br><strong>Responsible unit:</strong> ${htmlEscape(ticket.ownerUnit)}</div><p><strong>Update</strong><br>${htmlEscape(update.message || update.label || 'Your case has been updated.').replace(/\n/g,'<br>')}</p><p><a href="${htmlEscape(statusUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Track your case or respond</a></p><p>${final?'This is the final decision recorded for this case. You may use the tracking page if you need to review the decision or submit an authorised reopening request.':'Please use the tracking page to review the update. If more evidence is requested, upload it there.'}</p><p>Regards,<br>Student Support Services<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+  await sendGmailHtmlEmail({to:ticket.email,subject,html});
 }
 
 // 1A. STUDENT SUPPORT SERVICES AND CENTRE COORDINATOR TICKETS
@@ -1846,7 +1857,9 @@ app.post('/api/support/tickets', supportUpload.array('evidenceFiles', 10), async
       ownerUnit: payload.category.owner, supportUnit: payload.category.support,
       status: 'received', resolution: '', createdAt: now, acknowledgedAt: now,
       lastUpdatedAt: now, dueAt: supportDateFromHours(payload.priority.hours),
-      auditTrail: [{ action: 'Ticket received', at: now, by: 'Student Support Services' }]
+      auditTrail: [{ action: 'Ticket received', at: now, by: 'Student Support Services' }],
+      studentUpdates: [{ label: 'Ticket received', message: 'Your matter has been received by Student Support Services and is awaiting screening.', at: now }],
+      officerEvidence: [], interUnitMessages: []
     };
     await mutateSupportTickets(tickets => { tickets.push(ticket); return ticket; });
     sendSupportAcknowledgementEmail(ticket, req).catch(error => console.error('Support acknowledgement email failed:', error.message));
@@ -1866,9 +1879,37 @@ app.get('/api/support/tickets/:reference', async (req, res) => {
   if (!ticket) return res.status(404).json({ error: 'No ticket was found with that reference and email combination.' });
   res.json({ ok: true, ticket: supportPublicTicket(ticket) });
 });
+app.post('/api/support/tickets/:reference/evidence', supportUpload.array('evidenceFiles', 10), async (req,res)=>{
+  try {
+    const reference=String(req.params.reference||'').trim().toUpperCase();
+    const email=String(req.body?.email||'').trim().toLowerCase();
+    const note=String(req.body?.note||'').trim().slice(0,2000);
+    if(!reference||!isEmail(email)) return res.status(400).json({error:'Enter the ticket reference and the email used to submit it.'});
+    if(!Array.isArray(req.files)||!req.files.length) return res.status(400).json({error:'Attach at least one evidence file.'});
+    let updated=null;
+    await mutateSupportTickets(tickets=>{
+      const ticket=tickets.find(item=>item.reference.toUpperCase()===reference&&item.email.toLowerCase()===email);
+      if(!ticket) return null;
+      if(!['evidence-requested','lacks-evidence','awaiting-student'].includes(ticket.status)) return 'not-requested';
+      const now=new Date().toISOString();
+      ticket.evidence=Array.isArray(ticket.evidence)?ticket.evidence:[];
+      ticket.evidence.push(...req.files.map(file=>({...fileRecord(file),source:'student-follow-up',uploadedAt:now,note})));
+      ticket.status='in-progress'; ticket.lastUpdatedAt=now;
+      ticket.auditTrail=Array.isArray(ticket.auditTrail)?ticket.auditTrail:[];
+      ticket.auditTrail.push({action:'Student supplied additional evidence',note,at:now,by:'Student'});
+      ticket.studentUpdates=Array.isArray(ticket.studentUpdates)?ticket.studentUpdates:[];
+      ticket.studentUpdates.push({label:'Additional evidence received',message:'Student Support Services has received the additional evidence and the investigation is continuing.',at:now});
+      updated={...ticket}; return ticket;
+    });
+    if(updated==='not-requested') return res.status(409).json({error:'Student Support has not requested additional evidence for this case.'});
+    if(!updated) return res.status(404).json({error:'No ticket was found with that reference and email combination.'});
+    sendSupportStudentUpdateEmail(updated,{label:'Additional evidence received',message:'We have received your additional evidence and the investigation is continuing.'},req).catch(error=>console.error('Support evidence confirmation email failed:',error.message));
+    return res.json({ok:true,ticket:supportPublicTicket(updated)});
+  } catch(error) { console.error('Student support evidence upload failed:',error); await removeUploaded(req).catch(()=>{}); return res.status(500).json({error:'The additional evidence could not be uploaded.'}); }
+});
 
 const SUPPORT_STATUS_LABELS = Object.freeze({
-  received: 'Received', triaged: 'Triaged', assigned: 'Assigned', 'awaiting-student': 'Awaiting student', 'in-progress': 'In progress', resolved: 'Resolved', reopened: 'Reopened', closed: 'Closed'
+  received: 'Received', triaged: 'Triaged', assigned: 'Assigned', 'awaiting-student': 'Awaiting student', 'evidence-requested': 'Additional evidence requested', 'lacks-evidence': 'Complaint lacks evidence', 'investigation-ongoing': 'Investigation ongoing', 'in-progress': 'In progress', resolved: 'Complaint resolved', reopened: 'Reopened', 'final-decision': 'Final decision issued', closed: 'Closed'
 });
 app.get('/support-admin', supportWorkspaceAuth, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'support-admin.html')));
 app.get('/support-admin.js', supportWorkspaceAuth, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'support-admin.js')));
@@ -1879,7 +1920,7 @@ app.get('/api/support/admin/tickets', supportWorkspaceAuth, async (_req, res) =>
     category: ticket.categoryLabel, priority: ticket.priorityLabel, status: ticket.status, statusLabel: SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,
     ownerUnit: ticket.ownerUnit, supportUnit: ticket.supportUnit, studyCentre: ticket.studyCentre, subject: ticket.subject,
     description: ticket.description, originRole: ticket.originRole, sensitive: ticket.sensitive, createdAt: ticket.createdAt,
-    dueAt: ticket.dueAt, lastUpdatedAt: ticket.lastUpdatedAt, resolution: ticket.resolution || '', auditTrail: ticket.auditTrail || [], evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [], forwardHistory: ticket.forwardHistory || []
+    dueAt: ticket.dueAt, lastUpdatedAt: ticket.lastUpdatedAt, resolution: ticket.resolution || '', auditTrail: ticket.auditTrail || [], studentUpdates:ticket.studentUpdates||[], evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [], officerEvidence:Array.isArray(ticket.officerEvidence)?ticket.officerEvidence:[], forwardHistory: ticket.forwardHistory || [], interUnitMessages:ticket.interUnitMessages||[]
   })) });
 });
 app.patch('/api/support/admin/tickets/:id', supportWorkspaceAuth, requireSupportRole('officer'), async (req, res) => {
@@ -1887,6 +1928,7 @@ app.patch('/api/support/admin/tickets/:id', supportWorkspaceAuth, requireSupport
   if (!Object.prototype.hasOwnProperty.call(SUPPORT_STATUS_LABELS, nextStatus)) return res.status(400).json({ error: 'Choose a valid ticket status.' });
   const ownerUnit = cleanHumanText(req.body?.ownerUnit).slice(0, 180);
   const note = String(req.body?.note || '').trim().slice(0, 2000);
+  if(['evidence-requested','lacks-evidence','investigation-ongoing','resolved','final-decision','closed'].includes(nextStatus)&&!note) return res.status(400).json({error:'Provide a clear message for the student before recording this case update.'});
   let updated = null;
   await mutateSupportTickets(tickets => {
     const ticket = tickets.find(item => item.id === req.params.id);
@@ -1894,22 +1936,25 @@ app.patch('/api/support/admin/tickets/:id', supportWorkspaceAuth, requireSupport
     const now = new Date().toISOString();
     ticket.status = nextStatus;
     if (ownerUnit) ticket.ownerUnit = ownerUnit;
-    if (nextStatus === 'resolved') ticket.studentResponseDueAt = supportDateFromHours(120);
+    if (['resolved','final-decision','closed'].includes(nextStatus)) ticket.studentResponseDueAt = supportDateFromHours(120);
     if (nextStatus === 'reopened') ticket.studentResponseDueAt = null;
-    if (note) ticket.resolution = nextStatus === 'resolved' || nextStatus === 'closed' ? note : ticket.resolution || '';
+    if (note) ticket.resolution = ['resolved','final-decision','closed'].includes(nextStatus) ? note : ticket.resolution || '';
     ticket.lastUpdatedAt = now;
     ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
     ticket.auditTrail.push({ action: `Status changed to ${SUPPORT_STATUS_LABELS[nextStatus]}`, note, at: now, by: 'Support administrator' });
+    ticket.studentUpdates=Array.isArray(ticket.studentUpdates)?ticket.studentUpdates:[];
+    ticket.studentUpdates.push({label:SUPPORT_STATUS_LABELS[nextStatus],message:note||`Your case status is now ${SUPPORT_STATUS_LABELS[nextStatus]}.`,at:now});
     if (ticket.auditTrail.length > 100) ticket.auditTrail = ticket.auditTrail.slice(-100);
-    updated = supportPublicTicket(ticket);
+    updated={...ticket};
     return ticket;
   });
   if (!updated) return res.status(404).json({ error: 'Support ticket not found.' });
-  res.json({ ok: true, ticket: updated });
+  sendSupportStudentUpdateEmail(updated,{label:SUPPORT_STATUS_LABELS[updated.status],message:note},req).catch(error=>console.error('Support status email failed:',error.message));
+  res.json({ ok: true, ticket: supportPublicTicket(updated) });
 });
 
-function supportEvidenceFor(ticket, index) {
-  const evidence = Array.isArray(ticket?.evidence) ? ticket.evidence : [];
+function supportEvidenceFor(ticket, index, collection='evidence') {
+  const evidence = Array.isArray(ticket?.[collection]) ? ticket[collection] : [];
   const file = evidence[Number(index)];
   if (!Number.isInteger(Number(index)) || Number(index) < 0 || !file?.storedName) return null;
   const filePath = path.join(FILES_DIR, path.basename(file.storedName));
@@ -1942,6 +1987,54 @@ app.get('/api/support/admin/tickets/:id/evidence/:index', supportWorkspaceAuth, 
   const evidence = supportEvidenceFor(ticket, req.params.index);
   if (!evidence) return res.status(404).json({ error: 'Evidence file not found.' });
   return sendSupportEvidence(res, evidence);
+});
+app.get('/api/support/admin/tickets/:id/officer-evidence/:index', supportWorkspaceAuth, async (req,res)=>{
+  const ticket=(await readSupportTickets()).find(item=>item.id===req.params.id);
+  if(!ticket) return res.status(404).json({error:'Support ticket not found.'});
+  const evidence=supportEvidenceFor(ticket,req.params.index,'officerEvidence');
+  if(!evidence) return res.status(404).json({error:'Officer evidence file not found.'});
+  return sendSupportEvidence(res,evidence);
+});
+app.post('/api/support/admin/tickets/:id/officer-evidence', supportWorkspaceAuth, requireSupportRole('officer'), supportUpload.array('evidenceFiles',10), async(req,res)=>{
+  try {
+    const note=String(req.body?.note||'').trim().slice(0,2000);
+    if(!Array.isArray(req.files)||!req.files.length) return res.status(400).json({error:'Attach at least one evidence file.'});
+    let updated=null;
+    await mutateSupportTickets(tickets=>{
+      const ticket=tickets.find(item=>item.id===req.params.id); if(!ticket) return null;
+      const now=new Date().toISOString(); ticket.officerEvidence=Array.isArray(ticket.officerEvidence)?ticket.officerEvidence:[];
+      ticket.officerEvidence.push(...req.files.map(file=>({...fileRecord(file),uploadedAt:now,note,uploadedBy:req.supportIdentity?.name||'Support officer'})));
+      ticket.lastUpdatedAt=now; ticket.auditTrail=Array.isArray(ticket.auditTrail)?ticket.auditTrail:[];
+      ticket.auditTrail.push({action:'Officer evidence added',note,at:now,by:req.supportIdentity?.name||'Support officer'});
+      updated={...ticket}; return ticket;
+    });
+    if(!updated) return res.status(404).json({error:'Support ticket not found.'});
+    return res.json({ok:true,evidenceCount:updated.officerEvidence.length});
+  } catch(error) { console.error('Officer evidence upload failed:',error); await removeUploaded(req).catch(()=>{}); return res.status(500).json({error:'Officer evidence could not be uploaded.'}); }
+});
+app.post('/api/support/admin/tickets/:id/messages', supportWorkspaceAuth, requireSupportRole('officer'), async(req,res)=>{
+  const recipientName=cleanHumanText(req.body?.recipientName).slice(0,180);
+  const recipientEmail=String(req.body?.recipientEmail||'').trim().toLowerCase();
+  const message=String(req.body?.message||'').trim().slice(0,4000);
+  if(!recipientName||!recipientEmail||!message) return res.status(400).json({error:'Recipient unit, official email and message are required.'});
+  if(!isEmail(recipientEmail)) return res.status(400).json({error:'Enter a valid official unit email address.'});
+  if(!gmailConfigured()) return res.status(503).json({error:'Inter-unit messaging email is not configured yet.'});
+  const now=new Date().toISOString(); let ticketForEmail=null; const messageId=crypto.randomUUID();
+  await mutateSupportTickets(tickets=>{
+    const ticket=tickets.find(item=>item.id===req.params.id); if(!ticket) return null;
+    ticket.interUnitMessages=Array.isArray(ticket.interUnitMessages)?ticket.interUnitMessages:[];
+    ticket.interUnitMessages.push({id:messageId,recipientName,recipientEmail,message,status:'pending',createdAt:now,sentBy:req.supportIdentity?.name||'Support officer'});
+    ticket.auditTrail=Array.isArray(ticket.auditTrail)?ticket.auditTrail:[];
+    ticket.auditTrail.push({action:`Information requested from ${recipientName}`,note:message,at:now,by:req.supportIdentity?.name||'Support officer'});
+    ticket.lastUpdatedAt=now; ticketForEmail=JSON.parse(JSON.stringify(ticket)); return ticket;
+  });
+  if(!ticketForEmail) return res.status(404).json({error:'Support ticket not found.'});
+  try {
+    const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Information requested by Student Support Services</h2><p>Student Support Services requests information from ${htmlEscape(recipientName)} regarding the case below.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #d4a72c"><strong>Reference:</strong> ${htmlEscape(ticketForEmail.reference)}<br><strong>Category:</strong> ${htmlEscape(ticketForEmail.categoryLabel)}<br><strong>Student:</strong> ${htmlEscape(ticketForEmail.name)}<br><strong>Subject:</strong> ${htmlEscape(ticketForEmail.subject)}</div><p><strong>Request</strong><br>${htmlEscape(message).replace(/\n/g,'<br>')}</p><p>Please reply through the official Student Support communication channel, quoting the reference number.</p><p>Regards,<br>Student Support Services<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+    await sendGmailHtmlEmail({to:recipientEmail,subject:`Information requested: ${ticketForEmail.reference}`,html});
+    await mutateSupportTickets(tickets=>{const item=tickets.find(ticket=>ticket.id===req.params.id)?.interUnitMessages?.find(item=>item.id===messageId);if(item){item.status='sent';item.sentAt=new Date().toISOString();}return tickets;});
+    return res.json({ok:true,reference:ticketForEmail.reference});
+  } catch(error) { console.error('Inter-unit support message failed:',error); await mutateSupportTickets(tickets=>{const item=tickets.find(ticket=>ticket.id===req.params.id)?.interUnitMessages?.find(item=>item.id===messageId);if(item){item.status='failed';item.error=String(error.message||'Email delivery failed').slice(0,500);}return tickets;}); return res.status(502).json({error:'The message could not be delivered. Check the official email and try again.'}); }
 });
 
 app.post('/api/support/admin/tickets/:id/forward', supportWorkspaceAuth, requireSupportRole('officer'), async (req, res) => {
