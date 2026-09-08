@@ -165,6 +165,12 @@ const GMAIL_CLIENT_SECRET = String(process.env.GMAIL_CLIENT_SECRET || '').trim()
 const GMAIL_REFRESH_TOKEN = String(process.env.GMAIL_REFRESH_TOKEN || '').trim();
 const GMAIL_SENDER_EMAIL = String(process.env.GMAIL_SENDER_EMAIL || '').trim();
 const GMAIL_FROM_NAME = String(process.env.GMAIL_FROM_NAME || 'CoDE Academic Services Portal').trim();
+const TWILIO_ACCOUNT_SID = String(process.env.TWILIO_ACCOUNT_SID || '').trim();
+const TWILIO_AUTH_TOKEN = String(process.env.TWILIO_AUTH_TOKEN || '').trim();
+const TWILIO_SMS_FROM = String(process.env.TWILIO_SMS_FROM || '').trim();
+const TWILIO_WHATSAPP_FROM = String(process.env.TWILIO_WHATSAPP_FROM || '').trim();
+const SUPPORT_SMS_ENABLED = String(process.env.SUPPORT_SMS_ENABLED || 'false').trim().toLowerCase() === 'true';
+const SUPPORT_WHATSAPP_ENABLED = String(process.env.SUPPORT_WHATSAPP_ENABLED || 'false').trim().toLowerCase() === 'true';
 const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || '').trim().replace(/\/$/, '');
 const ASSIGNMENT_EXPIRY_DAYS = Math.min(60, Math.max(1, Number(process.env.ASSIGNMENT_EXPIRY_DAYS || 14) || 14));
 const DEVELOPER_ADMIN_USER = String(process.env.DEVELOPER_ADMIN_USER || 'developer').trim();
@@ -177,6 +183,7 @@ const SUPPORT_STATUS_TOKEN_SECRET = String(process.env.SUPPORT_STATUS_TOKEN_SECR
 const SUPPORT_ALLOWED_EMAIL_DOMAINS = new Set(String(process.env.SUPPORT_ALLOWED_EMAIL_DOMAINS || 'ucc.edu.gh').split(',').map(v => v.trim().toLowerCase()).filter(Boolean));
 const SUPPORT_HOLIDAYS = new Set(String(process.env.SUPPORT_HOLIDAYS || '').split(',').map(v => v.trim()).filter(v => /^\d{4}-\d{2}-\d{2}$/.test(v)));
 const SUPPORT_EVIDENCE_REMINDER_WORKING_DAYS = Math.min(10, Math.max(1, Number(process.env.SUPPORT_EVIDENCE_REMINDER_WORKING_DAYS || 3) || 3));
+const SUPPORT_LANGUAGES = Object.freeze({ en:'English', tw:'Twi', fr:'French' });
 
 const DEPARTMENTS = {
   'education': {
@@ -1985,6 +1992,8 @@ function supportPublicTicket(ticket) {
     canRespond: !['accepted','closed','resolved','final-decision'].includes(ticket.status),
     canGiveFeedback: ['accepted','closed'].includes(ticket.status) && !ticket.feedback,
     feedbackSubmitted: Boolean(ticket.feedback),
+    language: ticket.language || 'en',
+    notificationPreference: ticket.notificationPreference || 'email',
     sla: supportSlaSummary(ticket),
     updates: (ticket.studentUpdates || []).slice(-12)
   };
@@ -2004,27 +2013,104 @@ function supportTicketPayload(req) {
   const studyCentre = cleanHumanText(req.body?.studyCentre).slice(0, 180);
   const studentNumber = cleanHumanText(req.body?.studentNumber).slice(0, 100);
   const phone = cleanHumanText(req.body?.phone).slice(0, 40);
+  const language = Object.prototype.hasOwnProperty.call(SUPPORT_LANGUAGES, String(req.body?.language || '').trim()) ? String(req.body.language).trim() : 'en';
+  const notificationPreference = ['email','email-sms','email-whatsapp'].includes(String(req.body?.notificationPreference || '').trim()) ? String(req.body.notificationPreference).trim() : 'email';
   const programme = cleanHumanText(req.body?.programme).slice(0, 180);
   const academicDepartment = ['education','business','arts-social-sciences','science-mathematics'].includes(String(req.body?.academicDepartment || '').trim()) ? String(req.body.academicDepartment).trim() : '';
   const studyLevelKey = Object.prototype.hasOwnProperty.call(SUPPORT_STUDY_LEVELS, String(req.body?.studyLevel || '').trim())
     ? String(req.body.studyLevel).trim() : 'other';
   const sensitive = categoryKey === 'sensitive' || String(req.body?.sensitive || '') === 'true';
-  return { type, categoryKey, category, priorityKey, priority, name, email, subject, description, studyCentre, studentNumber, phone, programme, academicDepartment, studyLevelKey, studyLevelLabel: SUPPORT_STUDY_LEVELS[studyLevelKey], sensitive };
+  return { type, categoryKey, category, priorityKey, priority, name, email, subject, description, studyCentre, studentNumber, phone, language, notificationPreference, programme, academicDepartment, studyLevelKey, studyLevelLabel: SUPPORT_STUDY_LEVELS[studyLevelKey], sensitive };
+}
+function supportNormaliseMobile(value) {
+  const raw = String(value || '').trim().replace(/^whatsapp:/i, '');
+  if (!raw) return '';
+  const compact = raw.replace(/[\s().-]/g, '');
+  const candidate = compact.startsWith('+') ? compact : compact.startsWith('0') && compact.length === 10 ? `+233${compact.slice(1)}` : compact.startsWith('233') ? `+${compact}` : `+${compact}`;
+  return /^\+[1-9]\d{7,14}$/.test(candidate) ? candidate : '';
+}
+function supportMobileChannelConfigured(channel) {
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) return false;
+  return channel === 'sms' ? SUPPORT_SMS_ENABLED && Boolean(TWILIO_SMS_FROM) : channel === 'whatsapp' ? SUPPORT_WHATSAPP_ENABLED && Boolean(TWILIO_WHATSAPP_FROM) : false;
+}
+function supportMobileChannels(ticket) {
+  if (ticket.notificationPreference === 'email-sms') return ['sms'];
+  if (ticket.notificationPreference === 'email-whatsapp') return ['whatsapp'];
+  return [];
+}
+function supportNotificationText(ticket, kind, statusUrl) {
+  const reference = ticket.reference;
+  const status = SUPPORT_STATUS_LABELS[ticket.status] || ticket.status;
+  const language = ticket.language || 'en';
+  const messages = {
+    en: {
+      acknowledgement:`CoDE: Ticket ${reference} has been received. Track it at ${statusUrl}`,
+      reminder:`CoDE: Information is still required for ticket ${reference}. Respond at ${statusUrl}`,
+      update:`CoDE: Ticket ${reference} is now ${status}. View or respond at ${statusUrl}`
+    },
+    tw: {
+      acknowledgement:`CoDE: Yɛagye wo asɛm ${reference}. Hwɛ ne tebea wɔ ${statusUrl}`,
+      reminder:`CoDE: Yɛda so hia nsɛm ma ${reference}. Fa mmuae no kɔ ${statusUrl}`,
+      update:`CoDE: Wɔayɛ ${reference} ho nsakrae. Hwɛ wɔ ${statusUrl}`
+    },
+    fr: {
+      acknowledgement:`CoDE : dossier ${reference} reçu. Suivi : ${statusUrl}`,
+      reminder:`CoDE : informations requises pour ${reference}. Répondez : ${statusUrl}`,
+      update:`CoDE : dossier ${reference}, statut ${status}. Consultez : ${statusUrl}`
+    }
+  };
+  return (messages[language] || messages.en)[kind] || messages.en.update;
+}
+async function sendTwilioSupportMessage(channel, phone, body) {
+  if (!supportMobileChannelConfigured(channel)) throw new Error(`${channel === 'sms' ? 'SMS' : 'WhatsApp'} notifications are not configured.`);
+  const mobile = supportNormaliseMobile(phone);
+  if (!mobile) throw new Error('A valid international mobile number is required.');
+  const prefix = channel === 'whatsapp' ? 'whatsapp:' : '';
+  const from = channel === 'whatsapp' ? TWILIO_WHATSAPP_FROM : TWILIO_SMS_FROM;
+  const fromAddress = channel === 'whatsapp' ? supportNormaliseMobile(from) : (supportNormaliseMobile(from) || String(from).trim());
+  if (!fromAddress) throw new Error('The sender address is not configured.');
+  const form = new URLSearchParams({ To:`${prefix}${mobile}`, From:`${prefix}${fromAddress}`, Body:String(body || '').slice(0, 1400) });
+  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(TWILIO_ACCOUNT_SID)}/Messages.json`, {
+    method:'POST', headers:{ authorization:`Basic ${Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64')}`, 'content-type':'application/x-www-form-urlencoded' }, body:form
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(String(result.message || `Twilio returned ${response.status}`).slice(0, 300));
+  return result.sid || '';
+}
+async function dispatchSupportStudentNotification(ticket, { kind='update', subject, html, req }) {
+  const baseUrl = req ? baseUrlFor(req) : PUBLIC_BASE_URL;
+  const statusUrl = baseUrl ? `${baseUrl}/support-track.html?token=${encodeURIComponent(supportStatusToken(ticket))}` : '';
+  const operations = [];
+  if (gmailConfigured() && isEmail(ticket.email)) operations.push({ channel:'email', send:() => sendGmailHtmlEmail({ to:ticket.email, subject, html }) });
+  for (const channel of supportMobileChannels(ticket)) {
+    if (supportMobileChannelConfigured(channel)) operations.push({ channel, send:() => sendTwilioSupportMessage(channel, ticket.phone, supportNotificationText(ticket, kind, statusUrl)) });
+  }
+  if (!operations.length) return;
+  const results = await Promise.allSettled(operations.map(operation => operation.send()));
+  const at = new Date().toISOString();
+  await mutateSupportTickets(tickets => {
+    const stored = tickets.find(item => item.id === ticket.id);
+    if (!stored) return tickets;
+    stored.notificationHistory = Array.isArray(stored.notificationHistory) ? stored.notificationHistory : [];
+    results.forEach((result, index) => stored.notificationHistory.push({ type:kind, channel:operations[index].channel, status:result.status === 'fulfilled' ? 'sent' : 'failed', providerMessageId:result.status === 'fulfilled' ? String(result.value?.id || result.value || '') : '', error:result.status === 'rejected' ? String(result.reason?.message || result.reason || 'Delivery failed').slice(0, 300) : '', at }));
+    if (stored.notificationHistory.length > 100) stored.notificationHistory = stored.notificationHistory.slice(-100);
+    return tickets;
+  });
+  const failure = results.find(result => result.status === 'rejected');
+  if (failure && results.every(result => result.status === 'rejected')) throw failure.reason;
 }
 async function sendSupportAcknowledgementEmail(ticket, req) {
-  if (!isEmail(ticket.email) || !gmailConfigured()) return;
   const statusUrl = `${baseUrlFor(req)}/support-track.html?token=${encodeURIComponent(supportStatusToken(ticket))}`;
   const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">CoDE Academic Services Portal acknowledgement</h2><p>Dear ${htmlEscape(ticket.name || 'Student')},</p><p>Your ${ticket.type === 'service-request' ? 'service request' : 'complaint'} has been received by Student Support Services.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #d4a72c"><strong>Reference:</strong> ${htmlEscape(ticket.reference)}<br><strong>Category:</strong> ${htmlEscape(ticket.categoryLabel)}<br><strong>Responsible unit:</strong> ${htmlEscape(ticket.ownerUnit)}<br><strong>Target response:</strong> ${htmlEscape(new Date(ticket.dueAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'}))} UTC</div><p><a href="${htmlEscape(statusUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Track this ticket</a></p><p>Please quote the reference in any follow-up communication.</p><p>Regards,<br>Student Support Services<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
-  await sendGmailHtmlEmail({to: ticket.email, subject: `Support ticket received - ${ticket.reference}`, html});
+  await dispatchSupportStudentNotification(ticket, { kind:'acknowledgement', subject:`Support ticket received - ${ticket.reference}`, html, req });
 }
 async function sendSupportStudentUpdateEmail(ticket, update, req) {
-  if (!isEmail(ticket.email) || !gmailConfigured()) return;
   const statusUrl = `${baseUrlFor(req)}/support-track.html?token=${encodeURIComponent(supportStatusToken(ticket))}`;
   const final = ['resolved','closed','final-decision'].includes(ticket.status);
   const subject = final ? `Final decision on your support ticket - ${ticket.reference}` : `Update on your support ticket - ${ticket.reference}`;
   const heading = final ? 'Final decision recorded' : 'Your support ticket has been updated';
   const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">${heading}</h2><p>Dear ${htmlEscape(ticket.name || 'Student')},</p><p>Student Support Services has updated your ${ticket.type === 'service-request' ? 'service request' : 'complaint'}.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #d4a72c"><strong>Reference:</strong> ${htmlEscape(ticket.reference)}<br><strong>Current stage:</strong> ${htmlEscape(SUPPORT_STATUS_LABELS[ticket.status] || ticket.status)}<br><strong>Responsible unit:</strong> ${htmlEscape(ticket.ownerUnit)}</div><p><strong>Update</strong><br>${htmlEscape(update.message || update.label || 'Your case has been updated.').replace(/\n/g,'<br>')}</p><p><a href="${htmlEscape(statusUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Track your case or respond</a></p><p>${final?'This is the final decision recorded for this case. You may use the tracking page if you need to review the decision or submit an authorised reopening request.':'Please use the tracking page to review the update. If more evidence is requested, upload it there.'}</p><p>Regards,<br>Student Support Services<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
-  await sendGmailHtmlEmail({to:ticket.email,subject,html});
+  await dispatchSupportStudentNotification(ticket, { kind:'update', subject, html, req });
 }
 
 const supportRateBuckets = new Map();
@@ -2062,7 +2148,13 @@ app.get('/api/support/config', async (_req, res) => {
   const units = Object.entries(STAFF_UNITS).filter(([id]) => !['payroll','auditor'].includes(id)).map(([id, unit]) => ({ id, label: unit.label }));
   const categories = Object.entries(SUPPORT_CATEGORIES).map(([id, category]) => ({ id, label: category.label, suggestedUnit: category.suggestedUnit || 'student-support', responsibleUnit: category.owner, workingDays: category.days, evidenceGuidance: SUPPORT_CATEGORY_GUIDANCE[id]?.evidence || SUPPORT_CATEGORY_GUIDANCE.general.evidence, beforeSubmitting: SUPPORT_CATEGORY_GUIDANCE[id]?.before || SUPPORT_CATEGORY_GUIDANCE.general.before }));
   const departments = Object.entries(DEPARTMENTS).map(([id, department]) => ({ id, label: department.name }));
-  res.json({ ok: true, units, categories, departments, studyCentres: [...new Set(directory)] });
+  const notificationChannels = [
+    { id:'email', label:'Email only', available:true },
+    { id:'email-sms', label:'Email and SMS', available:supportMobileChannelConfigured('sms') },
+    { id:'email-whatsapp', label:'Email and WhatsApp', available:supportMobileChannelConfigured('whatsapp') }
+  ];
+  const languages = Object.entries(SUPPORT_LANGUAGES).map(([id, label]) => ({ id, label }));
+  res.json({ ok: true, units, categories, departments, studyCentres: [...new Set(directory)], languages, notificationChannels });
 });
 app.get('/centre-coordinators.html', staffAuth, (req, res) => {
   const units = normalizeStaffUnits(req.staffIdentity?.units);
@@ -2077,6 +2169,9 @@ app.post('/api/support/tickets', supportRateLimit(12), supportUpload.array('evid
       return res.status(400).json({ error: 'Name, email, subject and description are required.' });
     }
     if (!isEmail(payload.email)) return res.status(400).json({ error: 'Enter a valid email address.' });
+    const requestedMobile = payload.notificationPreference === 'email-sms' ? 'sms' : payload.notificationPreference === 'email-whatsapp' ? 'whatsapp' : '';
+    if (requestedMobile && !supportMobileChannelConfigured(requestedMobile)) return res.status(400).json({ error: `${requestedMobile === 'sms' ? 'SMS' : 'WhatsApp'} notifications are not available. Choose email notifications.` });
+    if (requestedMobile && !supportNormaliseMobile(payload.phone)) return res.status(400).json({ error: 'Enter a valid mobile number for SMS or WhatsApp notifications.' });
     if (payload.description.length < 20) return res.status(400).json({ error: 'Please provide at least 20 characters describing the matter.' });
     const now = new Date().toISOString();
     const duplicate = (await readSupportTickets()).find(item =>
@@ -2097,7 +2192,7 @@ app.post('/api/support/tickets', supportRateLimit(12), supportUpload.array('evid
       id: crypto.randomUUID(), reference: supportReference(), type: payload.type,
       categoryKey: payload.categoryKey || 'general', categoryLabel: payload.category.label,
       priorityKey: payload.priorityKey, priorityLabel: payload.priority.label,
-      name: payload.name, email: payload.email, phone: payload.phone,
+      name: payload.name, email: payload.email, phone: payload.phone, language: payload.language, notificationPreference: payload.notificationPreference,
       studentNumber: payload.studentNumber, studyCentre: payload.studyCentre,
       programme: payload.programme, academicDepartment: payload.academicDepartment,
       studyLevel: payload.studyLevelKey, studyLevelLabel: payload.studyLevelLabel,
@@ -2276,20 +2371,27 @@ app.post('/api/support/tickets/:reference/feedback', supportRateLimit(10), async
   const reference = String(req.params.reference || '').trim().toUpperCase();
   const credentials = supportTicketCredentials(req, reference);
   const rating = Number(req.body?.rating);
+  const easeOfUse = Number(req.body?.easeOfUse);
+  const communication = Number(req.body?.communication);
+  const timeliness = Number(req.body?.timeliness);
+  const staffCourtesy = Number(req.body?.staffCourtesy);
   const resolved = String(req.body?.resolved || '').trim();
+  const notificationHelpful = String(req.body?.notificationHelpful || 'not-used').trim();
+  const languageHelp = String(req.body?.languageHelp || 'not-needed').trim();
   const comment = String(req.body?.comment || '').trim().slice(0, 2000);
-  if (!credentials || !Number.isInteger(rating) || rating < 1 || rating > 5 || !['yes','partly','no'].includes(resolved)) return res.status(400).json({ error: 'Choose a rating from 1 to 5 and tell us whether the matter was resolved.' });
-  if (rating <= 2 && comment.length < 10) return res.status(400).json({ error: 'Please briefly explain a low rating so the service can be improved.' });
+  const scores = [rating, easeOfUse, communication, timeliness, staffCourtesy];
+  if (!credentials || scores.some(score => !Number.isInteger(score) || score < 1 || score > 5) || !['yes','partly','no'].includes(resolved) || !['yes','no','not-used'].includes(notificationHelpful) || !['yes','no','not-needed'].includes(languageHelp)) return res.status(400).json({ error: 'Complete every service rating from 1 to 5 and choose the required survey responses.' });
+  if (scores.some(score => score <= 2) && comment.length < 10) return res.status(400).json({ error: 'Please briefly explain any low rating so the service can be improved.' });
   let updated = null;
   await mutateSupportTickets(tickets => {
     const ticket = tickets.find(item => item.reference.toUpperCase() === reference && item.email.toLowerCase() === credentials.email.toLowerCase());
     if (!ticket) return null;
     if (!['accepted','closed'].includes(ticket.status)) { updated = 'not-closed'; return ticket; }
     const now = new Date().toISOString();
-    ticket.feedback = { rating, resolved, comment, submittedAt: now };
+    ticket.feedback = { rating, easeOfUse, communication, timeliness, staffCourtesy, resolved, notificationHelpful, languageHelp, comment, submittedAt: now };
     ticket.lastUpdatedAt = now;
     ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
-    ticket.auditTrail.push({ action: 'Student service feedback submitted', note: `Rating ${rating}/5; resolved: ${resolved}.`, at: now, by: 'Student' });
+    ticket.auditTrail.push({ action: 'Student service feedback submitted', note: `Overall ${rating}/5; ease ${easeOfUse}/5; communication ${communication}/5; timeliness ${timeliness}/5; courtesy ${staffCourtesy}/5; resolved: ${resolved}.`, at: now, by: 'Student' });
     updated = { ...ticket };
     return ticket;
   });
@@ -2338,7 +2440,7 @@ app.get('/api/support/admin/tickets', supportWorkspaceAuth, async (req, res) => 
   const start = (page - 1) * pageSize;
   const pageTickets = tickets.slice(start, start + pageSize);
   res.json({ ok: true, total, permissionTotal, page, pageSize, pages: Math.max(1, Math.ceil(total / pageSize)), tickets: pageTickets.map(ticket => ({
-    id: ticket.id, reference: ticket.reference, name: ticket.name, email: ticket.email, type: ticket.type, studyLevel: ticket.studyLevelLabel || '',
+    id: ticket.id, reference: ticket.reference, name: ticket.name, email: ticket.email, phone:ticket.phone || '', type: ticket.type, studyLevel: ticket.studyLevelLabel || '', language:ticket.language || 'en', notificationPreference:ticket.notificationPreference || 'email',
     categoryKey: ticket.categoryKey, category: ticket.categoryLabel, priority: ticket.priorityLabel, status: ticket.status, statusLabel: SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,
     priorityKey: ticket.priorityKey, ownerUnit: ticket.ownerUnit, ownerUnitId: ticket.ownerUnitId || '', assignedCaseOwner: ticket.assignedCaseOwner || '', intendedUnit: ticket.intendedUnit || '', supportUnit: ticket.supportUnit, studyCentre: ticket.studyCentre, programme: ticket.programme || '', academicDepartment: ticket.academicDepartment || '', subject: ticket.subject,
     description: ticket.description, originRole: ticket.originRole, sensitive: ticket.sensitive, createdAt: ticket.createdAt,
@@ -2352,16 +2454,20 @@ function supportCsvValue(value) {
 }
 app.get('/api/support/admin/tickets.csv', supportWorkspaceAuth, async (req, res) => {
   const tickets = filterSupportAdminTickets(await readSupportTickets(), req.supportIdentity, req.query);
-  const headers = ['Reference','Created','Last updated','Status','Priority','Category','Confidentiality','Student','Email','Student number','Study centre','Programme','Responsible unit','Assigned officer','Due','SLA','First response hours','Resolution hours','Feedback rating','Feedback resolved'];
+  const headers = ['Reference','Created','Last updated','Status','Priority','Category','Matter type','Confidentiality','Student','Email','Phone','Student number','Study centre','Programme','Responsible unit','Assigned officer','Due','SLA','First response hours','Resolution hours','Feedback rating','Ease of use','Communication','Timeliness','Staff courtesy','Feedback resolved','Notification preference','Assistance language'];
   const hours = (start, end) => start && end ? Math.max(0, (new Date(end).getTime() - new Date(start).getTime()) / 3600000).toFixed(1) : '';
   const rows = tickets.map(ticket => {
     const sla = supportSlaSummary(ticket);
     const slaLabel = sla.overdue ? 'Overdue' : sla.atRisk ? 'At risk' : sla.paused ? 'Paused' : 'On track';
-    return [ticket.reference,ticket.createdAt,ticket.lastUpdatedAt,SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,ticket.priorityLabel,ticket.categoryLabel,ticket.sensitive ? 'Restricted' : 'Standard',ticket.name,ticket.email,ticket.studentNumber,ticket.studyCentre,ticket.programme,ticket.ownerUnit,ticket.assignedCaseOwner,ticket.dueAt,slaLabel,hours(ticket.createdAt,ticket.firstResponseAt),hours(ticket.createdAt,ticket.resolvedAt),ticket.feedback?.rating || '',ticket.feedback?.resolved || ''].map(supportCsvValue).join(',');
+    return [ticket.reference,ticket.createdAt,ticket.lastUpdatedAt,SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,ticket.priorityLabel,ticket.categoryLabel,ticket.type,ticket.sensitive ? 'Restricted' : 'Standard',ticket.name,ticket.email,ticket.phone,ticket.studentNumber,ticket.studyCentre,ticket.programme,ticket.ownerUnit,ticket.assignedCaseOwner,ticket.dueAt,slaLabel,hours(ticket.createdAt,ticket.firstResponseAt),hours(ticket.createdAt,ticket.resolvedAt),ticket.feedback?.rating || '',ticket.feedback?.easeOfUse || '',ticket.feedback?.communication || '',ticket.feedback?.timeliness || '',ticket.feedback?.staffCourtesy || '',ticket.feedback?.resolved || '',ticket.notificationPreference || 'email',SUPPORT_LANGUAGES[ticket.language] || SUPPORT_LANGUAGES.en].map(supportCsvValue).join(',');
   });
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="student-support-cases-${supportDateKey(new Date())}.csv"`);
   res.send(`\uFEFF${[headers.map(supportCsvValue).join(','), ...rows].join('\r\n')}`);
+});
+app.get('/api/support/admin/tickets.xlsx', supportWorkspaceAuth, async (req, res) => {
+  const tickets = filterSupportAdminTickets(await readSupportTickets(), req.supportIdentity, req.query);
+  sendSupportWorkbook(res, tickets, `student-support-register-${supportDateKey(new Date())}.xlsx`, false);
 });
 app.patch('/api/support/admin/tickets/:id', supportWorkspaceAuth, requireSupportRole('officer'), async (req, res) => {
   const nextStatus = String(req.body?.status || '').trim();
@@ -4399,6 +4505,112 @@ function supportDashboardTickets(tickets, unitId) {
   if(unitId==='regional-administrator') return visible.filter(ticket=>ticket.originRole==='centre-coordinator'||(ticket.referrals||[]).some(referral=>referral.targetUnit===unitId));
   return visible.filter(ticket=>ticket.ownerUnitId===unitId||(ticket.referrals||[]).some(referral=>referral.targetUnit===unitId));
 }
+function supportTicketsForStaffIdentity(tickets, identity) {
+  const units = normalizeStaffUnits(identity?.units);
+  const visible = new Map();
+  for (const unit of units) for (const ticket of supportDashboardTickets(tickets, unit)) visible.set(ticket.id, ticket);
+  return [...visible.values()].filter(ticket => !ticket.sensitive || units.some(unit => ['confidential-handler','provost'].includes(unit)));
+}
+function supportTicketInUnit(ticket, unitId) {
+  return ticket.ownerUnitId === unitId || (ticket.referrals || []).some(referral => referral.targetUnit === unitId || referral.sourceUnit === unitId) || (ticket.interUnitMessages || []).some(message => message.targetUnit === unitId || message.sourceUnit === unitId);
+}
+function filterSupportReportTickets(tickets, query = {}) {
+  const from = String(query.from || '').trim();
+  const to = String(query.to || '').trim();
+  const centre = String(query.centre || '').trim().toLowerCase();
+  const unit = String(query.unit || '').trim();
+  const type = String(query.type || '').trim();
+  const status = String(query.status || '').trim();
+  const category = String(query.category || '').trim();
+  return tickets.filter(ticket => {
+    const created = new Date(ticket.createdAt).getTime();
+    if (from && Number.isFinite(created) && created < new Date(`${from}T00:00:00.000Z`).getTime()) return false;
+    if (to && Number.isFinite(created) && created > new Date(`${to}T23:59:59.999Z`).getTime()) return false;
+    if (centre && String(ticket.studyCentre || '').trim().toLowerCase() !== centre) return false;
+    if (unit && !supportTicketInUnit(ticket, unit)) return false;
+    if (type && ticket.type !== type) return false;
+    if (status && ticket.status !== status) return false;
+    if (category && ticket.categoryKey !== category) return false;
+    return true;
+  });
+}
+function supportPerformanceMetric(tickets) {
+  const terminal = tickets.filter(ticket => ['resolved','final-decision','closed','accepted'].includes(ticket.status));
+  const open = tickets.filter(ticket => !['resolved','final-decision','closed','accepted'].includes(ticket.status));
+  const feedback = tickets.map(ticket => ticket.feedback).filter(Boolean);
+  const average = (values) => { const numeric=values.map(Number).filter(Number.isFinite); return numeric.length ? Number((numeric.reduce((sum,value)=>sum+value,0)/numeric.length).toFixed(1)) : null; };
+  const resolutionHours = terminal.filter(ticket => ticket.createdAt && ticket.resolvedAt).map(ticket => (new Date(ticket.resolvedAt).getTime() - new Date(ticket.createdAt).getTime()) / 3600000).filter(value => Number.isFinite(value) && value >= 0);
+  return {
+    total:tickets.length,
+    complaints:tickets.filter(ticket=>ticket.type==='complaint').length,
+    requests:tickets.filter(ticket=>ticket.type==='service-request').length,
+    open:open.length,
+    resolved:terminal.length,
+    overdue:open.filter(ticket=>supportSlaSummary(ticket).overdue).length,
+    atRisk:open.filter(ticket=>supportSlaSummary(ticket).atRisk).length,
+    slaCompliance:terminal.length ? Number((terminal.filter(ticket=>!ticket.slaBreachedAt).length / terminal.length * 100).toFixed(1)) : null,
+    feedbackResponses:feedback.length,
+    feedbackRate:terminal.length ? Number((feedback.length / terminal.length * 100).toFixed(1)) : null,
+    satisfaction:average(feedback.map(item=>item.rating)),
+    easeOfUse:average(feedback.map(item=>item.easeOfUse)),
+    communication:average(feedback.map(item=>item.communication)),
+    timeliness:average(feedback.map(item=>item.timeliness)),
+    staffCourtesy:average(feedback.map(item=>item.staffCourtesy)),
+    averageResolutionHours:average(resolutionHours)
+  };
+}
+function supportGroupedPerformance(tickets, kind) {
+  const groups = new Map();
+  if (kind === 'centre') {
+    for (const ticket of tickets) {
+      const key = String(ticket.studyCentre || 'Not stated').trim() || 'Not stated';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(ticket);
+    }
+  } else {
+    for (const ticket of tickets) {
+      const units = new Set([ticket.ownerUnitId, ...(ticket.referrals || []).flatMap(referral => [referral.sourceUnit, referral.targetUnit])].filter(unit => STAFF_UNITS[unit]));
+      for (const unit of units) {
+        const key = STAFF_UNITS[unit].label;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(ticket);
+      }
+    }
+  }
+  return [...groups.entries()].map(([label, items]) => ({ label, ...supportPerformanceMetric(items) })).sort((a,b)=>b.total-a.total || a.label.localeCompare(b.label));
+}
+function supportSafeSheetValue(value) {
+  const text = String(value ?? '').replace(/\r?\n/g, ' ').trim();
+  return /^[=+\-@]/.test(text) ? `'${text}` : text;
+}
+function supportRegisterAoA(tickets) {
+  const headers = ['S/N','REFERENCE','CREATED','LAST UPDATED','MATTER TYPE','STATUS','PRIORITY','CATEGORY','CONFIDENTIALITY','STUDENT','EMAIL','PHONE','STUDENT NUMBER','STUDY CENTRE','PROGRAMME','RESPONSIBLE UNIT','ASSIGNED OFFICER','DUE','SLA','FIRST RESPONSE HOURS','RESOLUTION HOURS','OVERALL RATING','EASE OF USE','COMMUNICATION','TIMELINESS','STAFF COURTESY','RESOLVED BY STUDENT','NOTIFICATION PREFERENCE','ASSISTANCE LANGUAGE'];
+  const hours=(start,end)=>start&&end?Number(Math.max(0,(new Date(end).getTime()-new Date(start).getTime())/3600000).toFixed(1)):'';
+  const rows=tickets.slice().sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))).map((ticket,index)=>{
+    const sla=supportSlaSummary(ticket);
+    const slaLabel=sla.overdue?'Overdue':sla.atRisk?'At risk':sla.paused?'Paused':'On track';
+    return [index+1,ticket.reference,ticket.createdAt,ticket.lastUpdatedAt,ticket.type,SUPPORT_STATUS_LABELS[ticket.status]||ticket.status,ticket.priorityLabel,ticket.categoryLabel,ticket.sensitive?'Restricted':'Standard',ticket.name,ticket.email,ticket.phone,ticket.studentNumber,ticket.studyCentre,ticket.programme,ticket.ownerUnit,ticket.assignedCaseOwner,ticket.dueAt,slaLabel,hours(ticket.createdAt,ticket.firstResponseAt),hours(ticket.createdAt,ticket.resolvedAt),ticket.feedback?.rating||'',ticket.feedback?.easeOfUse||'',ticket.feedback?.communication||'',ticket.feedback?.timeliness||'',ticket.feedback?.staffCourtesy||'',ticket.feedback?.resolved||'',ticket.notificationPreference||'email',SUPPORT_LANGUAGES[ticket.language]||SUPPORT_LANGUAGES.en].map(supportSafeSheetValue);
+  });
+  return [headers,...rows];
+}
+function supportPerformanceAoA(rows, heading) {
+  const headers=[heading,'TOTAL','COMPLAINTS','SERVICE REQUESTS','OPEN','RESOLVED / CLOSED','OVERDUE','AT RISK','SLA COMPLIANCE %','FEEDBACK RESPONSES','FEEDBACK RATE %','SATISFACTION /5','EASE /5','COMMUNICATION /5','TIMELINESS /5','COURTESY /5','AVG RESOLUTION HOURS'];
+  return [headers,...rows.map(row=>[row.label,row.total,row.complaints,row.requests,row.open,row.resolved,row.overdue,row.atRisk,row.slaCompliance??'',row.feedbackResponses,row.feedbackRate??'',row.satisfaction??'',row.easeOfUse??'',row.communication??'',row.timeliness??'',row.staffCourtesy??'',row.averageResolutionHours??''])];
+}
+function supportWorkbookBuffer(tickets, includeRegister = true) {
+  const workbook=XLSX.utils.book_new();
+  const overall=supportPerformanceMetric(tickets);
+  addSheet(workbook,'Summary',[['SERVICE PERFORMANCE SUMMARY','VALUE'],['Generated at',new Date().toISOString()],['Total cases',overall.total],['Complaints',overall.complaints],['Service requests',overall.requests],['Open cases',overall.open],['Resolved or closed',overall.resolved],['Overdue',overall.overdue],['At risk',overall.atRisk],['SLA compliance %',overall.slaCompliance??''],['Feedback responses',overall.feedbackResponses],['Feedback response rate %',overall.feedbackRate??''],['Average satisfaction /5',overall.satisfaction??''],['Average resolution hours',overall.averageResolutionHours??'']],[34,24]);
+  addSheet(workbook,'By Study Centre',supportPerformanceAoA(supportGroupedPerformance(tickets,'centre'),'STUDY CENTRE'),[38,12,14,18,12,18,12,12,20,20,18,18,14,20,14,14,22]);
+  addSheet(workbook,'By Functional Unit',supportPerformanceAoA(supportGroupedPerformance(tickets,'unit'),'FUNCTIONAL UNIT'),[42,12,14,18,12,18,12,12,20,20,18,18,14,20,14,14,22]);
+  if (includeRegister) addSheet(workbook,'Complaint Request Register',supportRegisterAoA(tickets),[8,23,22,22,18,22,14,28,18,28,30,18,20,30,30,34,24,22,16,22,22,16,16,18,16,18,22,24,22]);
+  return XLSX.write(workbook,{type:'buffer',bookType:'xlsx'});
+}
+function sendSupportWorkbook(res, tickets, filename, performanceOnly = false) {
+  res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition',`attachment; filename="${safeBaseName(filename)}"`);
+  res.send(supportWorkbookBuffer(tickets,!performanceOnly));
+}
 function supportDashboardSummary(tickets, unitId) {
   const open=tickets.filter(ticket=>!['resolved','final-decision','closed','accepted'].includes(ticket.status));
   const completed=tickets.filter(ticket=>['resolved','final-decision','closed','accepted'].includes(ticket.status));
@@ -4407,13 +4619,14 @@ function supportDashboardSummary(tickets, unitId) {
   const countBy=(items,key)=>Object.entries(items.reduce((out,item)=>{const value=key==='status'?(SUPPORT_STATUS_LABELS[item.status]||item.status||'Not recorded'):(item[key]||'Not recorded');out[value]=(out[value]||0)+1;return out;},{})).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([label,count])=>({label,count}));
   const averageHours=(items,endKey)=>{const values=items.filter(ticket=>ticket[endKey]&&ticket.createdAt).map(ticket=>(new Date(ticket[endKey]).getTime()-new Date(ticket.createdAt).getTime())/3600000).filter(value=>Number.isFinite(value)&&value>=0);return values.length?Number((values.reduce((sum,value)=>sum+value,0)/values.length).toFixed(1)):null;};
   const auditCount=pattern=>tickets.filter(ticket=>(ticket.auditTrail||[]).some(item=>pattern.test(String(item.action||'')))).length;
+  const feedbackAverage=key=>{const values=feedback.map(item=>Number(item[key])).filter(Number.isFinite);return values.length?Number((values.reduce((sum,value)=>sum+value,0)/values.length).toFixed(1)):null;};
   return { unitId, label: STAFF_UNITS[unitId].label, total:tickets.length, open:open.length, resolved:tickets.length-open.length,
     overdue:open.filter(ticket=>ticket.dueAt&&new Date(ticket.dueAt).getTime()<now).length,
     atRisk:open.filter(ticket=>supportSlaSummary(ticket).atRisk).length,
     awaitingEvidence:open.filter(ticket=>['evidence-requested','lacks-evidence','awaiting-student'].includes(ticket.status)).length,
     reopened:auditCount(/reopened/i), appealed:auditCount(/appeal/i), accepted:auditCount(/accepted/i),
     slaCompliancePercent:completed.length?Number((completed.filter(ticket=>!ticket.slaBreachedAt).length/completed.length*100).toFixed(1)):null,
-    feedbackResponses:feedback.length, averageSatisfaction:feedback.length?Number((feedback.reduce((sum,item)=>sum+Number(item.rating),0)/feedback.length).toFixed(1)):null, lowRatings:feedback.filter(item=>Number(item.rating)<=2).length,
+    feedbackResponses:feedback.length, averageSatisfaction:feedbackAverage('rating'), averageEaseOfUse:feedbackAverage('easeOfUse'), averageCommunication:feedbackAverage('communication'), averageTimeliness:feedbackAverage('timeliness'), averageStaffCourtesy:feedbackAverage('staffCourtesy'), lowRatings:feedback.filter(item=>[item.rating,item.easeOfUse,item.communication,item.timeliness,item.staffCourtesy].some(value=>Number(value)<=2)).length,
     averageFirstResponseHours:averageHours(tickets,'firstResponseAt'), averageResolutionHours:averageHours(tickets,'resolvedAt'),
     routed:tickets.filter(ticket=>(ticket.referrals||[]).length).length,
     categoryBreakdown:countBy(tickets,'categoryLabel'), statusBreakdown:countBy(tickets,'status'), centreBreakdown:countBy(tickets,'studyCentre') };
@@ -4421,8 +4634,33 @@ function supportDashboardSummary(tickets, unitId) {
 app.get('/api/staff/dashboard', staffAuth, async(req,res)=>{
   const permitted=Object.keys(STAFF_UNITS).filter(unit=>!['payroll','auditor','stores'].includes(unit));
   const tickets=await readSupportTickets();
-  const dashboards=normalizeStaffUnits(req.staffIdentity?.units).filter(unit=>permitted.includes(unit)).map(unit=>supportDashboardSummary(supportDashboardTickets(tickets,unit),unit));
+  const dashboards=normalizeStaffUnits(req.staffIdentity?.units).filter(unit=>permitted.includes(unit)).map(unit=>supportDashboardSummary(filterSupportReportTickets(supportDashboardTickets(tickets,unit),req.query),unit));
   res.json({ok:true,dashboards});
+});
+app.get('/api/staff/support-report-options', staffAuth, async(req,res)=>{
+  const tickets=supportTicketsForStaffIdentity(await readSupportTickets(),req.staffIdentity);
+  const centres=[...new Set(tickets.map(ticket=>String(ticket.studyCentre||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  const permittedUnits=[...new Set(tickets.flatMap(ticket=>[ticket.ownerUnitId,...(ticket.referrals||[]).flatMap(referral=>[referral.sourceUnit,referral.targetUnit])]).filter(unit=>STAFF_UNITS[unit]))].map(id=>({id,label:STAFF_UNITS[id].label})).sort((a,b)=>a.label.localeCompare(b.label));
+  res.json({ok:true,centres,units:permittedUnits,categories:Object.entries(SUPPORT_CATEGORIES).map(([id,item])=>({id,label:item.label})),statuses:Object.entries(SUPPORT_STATUS_LABELS).map(([id,label])=>({id,label}))});
+});
+app.get('/api/staff/support-performance', staffAuth, async(req,res)=>{
+  const tickets=filterSupportReportTickets(supportTicketsForStaffIdentity(await readSupportTickets(),req.staffIdentity),req.query);
+  res.json({ok:true,summary:supportPerformanceMetric(tickets),byCentre:supportGroupedPerformance(tickets,'centre'),byUnit:supportGroupedPerformance(tickets,'unit')});
+});
+app.get('/api/staff/support-register.csv', staffAuth, async(req,res)=>{
+  const tickets=filterSupportReportTickets(supportTicketsForStaffIdentity(await readSupportTickets(),req.staffIdentity),req.query);
+  const rows=supportRegisterAoA(tickets).map(row=>row.map(supportCsvValue).join(','));
+  res.setHeader('Content-Type','text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition',`attachment; filename="support-register-${supportDateKey(new Date())}.csv"`);
+  res.send(`\uFEFF${rows.join('\r\n')}`);
+});
+app.get('/api/staff/support-register.xlsx', staffAuth, async(req,res)=>{
+  const tickets=filterSupportReportTickets(supportTicketsForStaffIdentity(await readSupportTickets(),req.staffIdentity),req.query);
+  sendSupportWorkbook(res,tickets,`support-register-${supportDateKey(new Date())}.xlsx`,false);
+});
+app.get('/api/staff/support-performance.xlsx', staffAuth, async(req,res)=>{
+  const tickets=filterSupportReportTickets(supportTicketsForStaffIdentity(await readSupportTickets(),req.staffIdentity),req.query);
+  sendSupportWorkbook(res,tickets,`support-performance-${supportDateKey(new Date())}.xlsx`,true);
 });
 function staffReferralTicket(ticket) {
   return {
@@ -4432,7 +4670,8 @@ function staffReferralTicket(ticket) {
     ownerUnit: ticket.ownerUnit, subject: ticket.subject, description: ticket.description, studyCentre: ticket.studyCentre,
     lastUpdatedAt: ticket.lastUpdatedAt, dueAt: ticket.dueAt || null, assignedCaseOwner: ticket.assignedCaseOwner || '', sensitive: Boolean(ticket.sensitive), sla: supportSlaSummary(ticket), evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [],
     officerEvidence: Array.isArray(ticket.officerEvidence) ? ticket.officerEvidence : [], referrals: ticket.referrals || [],
-    interUnitMessages: ticket.interUnitMessages || [], studentUpdates: ticket.studentUpdates || [], auditTrail: ticket.auditTrail || []
+    interUnitMessages: ticket.interUnitMessages || [], studentUpdates: ticket.studentUpdates || [], auditTrail: ticket.auditTrail || [], feedback:ticket.feedback || null,
+    notificationPreference:ticket.notificationPreference || 'email', language:ticket.language || 'en'
   };
 }
 app.use('/api/staff/referrals', supportSameOrigin);
@@ -5140,7 +5379,7 @@ app.get('/api/admin/:department/summary',departmentAuth,async(req,res)=>{
   });
 });
 
-app.get('/health',async(_req,res)=>{const admins=await readAdminUsers(),centreCatalogue=await readStudyCentreCatalogue(),centreDirectory=await readStudyCentreDirectory(),supportTickets=await readSupportTickets();const centreCount=Object.values(centreCatalogue).reduce((n,list)=>n+(Array.isArray(list)?list.length:0),0);res.json({ok:true,appName:'Codeacademicservices',departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',resources:(await readResources()).length+BUILTIN_RESOURCES.length,adminUsers:admins.length,pendingAdminInvitations:admins.filter(a=>!a.passwordHash&&a.invitationTokenHash).length,studyCentres:centreCount,studyCentreDirectory:centreDirectory.length,supportTickets:supportTickets.length,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'});});
+app.get('/health',async(_req,res)=>{const admins=await readAdminUsers(),centreCatalogue=await readStudyCentreCatalogue(),centreDirectory=await readStudyCentreDirectory(),supportTickets=await readSupportTickets();const centreCount=Object.values(centreCatalogue).reduce((n,list)=>n+(Array.isArray(list)?list.length:0),0);res.json({ok:true,appName:'Codeacademicservices',departments:Object.keys(DEPARTMENTS).length,emailConfigured:gmailConfigured(),emailProvider:'gmail',smsConfigured:supportMobileChannelConfigured('sms'),whatsappConfigured:supportMobileChannelConfigured('whatsapp'),resources:(await readResources()).length+BUILTIN_RESOURCES.length,adminUsers:admins.length,pendingAdminInvitations:admins.filter(a=>!a.passwordHash&&a.invitationTokenHash).length,studyCentres:centreCount,studyCentreDirectory:centreDirectory.length,supportTickets:supportTickets.length,developerPortalConfigured:DEVELOPER_ADMIN_PASSWORD!=='change-this-password'});});
 app.get('/vendor/xlsx.full.min.js', (_req,res)=>res.sendFile(path.join(__dirname,'node_modules','xlsx','dist','xlsx.full.min.js')));
 app.use(express.static(path.join(__dirname,'public'),{extensions:['html']}));
 app.use((err,req,res,_next)=>{
@@ -5167,14 +5406,15 @@ function supportLifecycleEmail(ticket, type) {
   return { subject:`${isBreach ? 'Overdue' : 'Due soon'}: ${ticket.reference}`, html:`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">${heading}</h2><p><strong>Reference:</strong> ${htmlEscape(ticket.reference)}<br><strong>Category:</strong> ${htmlEscape(ticket.categoryLabel)}<br><strong>Responsible unit:</strong> ${htmlEscape(ticket.ownerUnit)}<br><strong>Target:</strong> ${htmlEscape(new Date(ticket.dueAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'}))} UTC</p><p>${action}</p>${portalLink}<p>Do not forward case details outside authorised institutional channels.</p></div></body></html>` };
 }
 async function dispatchSupportLifecycleNotifications() {
-  if (!gmailConfigured()) return;
+  if (!gmailConfigured() && !supportMobileChannelConfigured('sms') && !supportMobileChannelConfigured('whatsapp')) return;
   const tickets = await readSupportTickets();
   const candidates = [];
   for (const ticket of tickets) {
     const eligible = type => { const state=ticket.notificationState?.[type]; return !state?.sentAt && Number(state?.attempts || 0) < 3 && (!state?.lastAttemptAt || Date.now() - new Date(state.lastAttemptAt).getTime() >= 60 * 60 * 1000); };
-    if (ticket.slaWarningAt && eligible('sla-warning')) candidates.push({ ticketId:ticket.id, type:'sla-warning' });
-    if (ticket.slaBreachedAt && eligible('sla-breach')) candidates.push({ ticketId:ticket.id, type:'sla-breach' });
-    if (ticket.slaPausedAt && supportElapsedWorkingDays(ticket.slaPausedAt) >= SUPPORT_EVIDENCE_REMINDER_WORKING_DAYS && eligible('evidence-reminder')) candidates.push({ ticketId:ticket.id, type:'evidence-reminder' });
+    if (gmailConfigured() && ticket.slaWarningAt && eligible('sla-warning')) candidates.push({ ticketId:ticket.id, type:'sla-warning' });
+    if (gmailConfigured() && ticket.slaBreachedAt && eligible('sla-breach')) candidates.push({ ticketId:ticket.id, type:'sla-breach' });
+    const reminderChannelAvailable=gmailConfigured() || supportMobileChannels(ticket).some(supportMobileChannelConfigured);
+    if (reminderChannelAvailable && ticket.slaPausedAt && supportElapsedWorkingDays(ticket.slaPausedAt) >= SUPPORT_EVIDENCE_REMINDER_WORKING_DAYS && eligible('evidence-reminder')) candidates.push({ ticketId:ticket.id, type:'evidence-reminder' });
   }
   for (const candidate of candidates) {
     let claimed = null;
@@ -5198,7 +5438,7 @@ async function dispatchSupportLifecycleNotifications() {
         if (!isEmail(claimed.email)) throw new Error('Student email is unavailable.');
         const statusUrl = PUBLIC_BASE_URL ? `${PUBLIC_BASE_URL}/support-track.html?token=${encodeURIComponent(supportStatusToken(claimed))}` : '';
         const link = statusUrl ? `<p><a href="${htmlEscape(statusUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:11px 16px;border-radius:7px;font-weight:bold">Respond to this ticket</a></p>` : '';
-        await sendGmailHtmlEmail({ to:claimed.email, subject:`Information still required - ${claimed.reference}`, html:`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Your response is still needed</h2><p>Dear ${htmlEscape(claimed.name || 'Student')},</p><p>The responsible unit is waiting for the information requested on ticket <strong>${htmlEscape(claimed.reference)}</strong>.</p><p>${htmlEscape(claimed.slaPauseReason || 'Please review the ticket and provide the requested evidence.')}</p>${link}<p>The service target remains paused until your response is received.</p></div></body></html>` });
+        await dispatchSupportStudentNotification(claimed, { kind:'reminder', subject:`Information still required - ${claimed.reference}`, html:`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Your response is still needed</h2><p>Dear ${htmlEscape(claimed.name || 'Student')},</p><p>The responsible unit is waiting for the information requested on ticket <strong>${htmlEscape(claimed.reference)}</strong>.</p><p>${htmlEscape(claimed.slaPauseReason || 'Please review the ticket and provide the requested evidence.')}</p>${link}<p>The service target remains paused until your response is received.</p></div></body></html>` });
       } else {
         const recipients = await supportLifecycleRecipients(claimed);
         if (!recipients.length) throw new Error('No eligible institutional escalation recipient is assigned.');
@@ -5256,4 +5496,7 @@ app.listen(PORT,'0.0.0.0',()=>{
     if (dept.password === 'change-this-password') console.warn(`WARNING: Set a secure admin password for ${slug}.`);
   }
   if (DEVELOPER_ADMIN_PASSWORD === 'change-this-password') console.warn('WARNING: Set DEVELOPER_ADMIN_PASSWORD before using the developer resource portal.');
+  if (SUPPORT_STATUS_TOKEN_SECRET === DEVELOPER_ADMIN_PASSWORD) console.warn('WARNING: Set SUPPORT_STATUS_TOKEN_SECRET to a separate long random value.');
+  if ((SUPPORT_SMS_ENABLED || SUPPORT_WHATSAPP_ENABLED) && (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN)) console.warn('WARNING: Mobile notifications are enabled but Twilio credentials are incomplete.');
+  if ((supportMobileChannelConfigured('sms') || supportMobileChannelConfigured('whatsapp')) && !PUBLIC_BASE_URL) console.warn('WARNING: Set PUBLIC_BASE_URL before enabling mobile notifications so tracking links are complete.');
 });

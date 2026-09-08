@@ -1,0 +1,58 @@
+CoDE Academic Services v35, Priority 3 service-quality improvements
+===================================================================
+
+Knowledge base and frequently requested services
+------------------------------------------------
+- Added a searchable Student Support Knowledge Base linked from the home page and support portal.
+- Includes guided preparation for incomplete results, fees, transcripts, certificates, centre changes, centre transit, name changes, programme matters, assessments and confidential complaints.
+- Frequently requested services open the complaint or request form with the correct type, category and assistance language already selected.
+- Added clear answers on duplicate tickets, tracking, evidence requests, confidential handling and mobile alerts.
+
+Student satisfaction survey
+---------------------------
+- Expanded the closure survey from one rating to five service-quality dimensions: overall satisfaction, ease of use, communication, timeliness and staff courtesy.
+- Captures whether the matter was resolved, whether notifications were helpful and whether language assistance met the student's need.
+- Any low score requires a short explanation so corrective action is possible.
+- Survey results feed unit and centre dashboards and performance workbooks.
+
+Optional SMS and WhatsApp notifications
+---------------------------------------
+- Students may opt into Email and SMS or Email and WhatsApp when the relevant channel is enabled.
+- Mobile numbers are normalised and validated before the ticket is accepted.
+- Mobile alerts contain only the permanent reference, current stage and secure tracking link. They do not expose complaint details.
+- Delivery outcomes are retained in the ticket notification history.
+- Email remains the primary service record.
+
+Multilingual assistance
+-----------------------
+- Added English, Twi and French assistance in the public knowledge base.
+- Students can record their preferred assistance language on a complaint or request.
+- The support form shows translated evidence guidance where needed.
+- SMS and WhatsApp alerts use the selected assistance language.
+- Official case records and decisions remain in English.
+
+Centre and unit service-performance reports
+-------------------------------------------
+- Every authenticated staff level has a protected report workspace based on existing permissions.
+- Reports can be filtered by period, study centre, functional unit, matter type, status and category.
+- Performance is summarised by study centre and functional unit, including caseload, complaints, service requests, open and resolved cases, overdue and at-risk cases, SLA compliance, survey response, satisfaction and resolution time.
+- Downloadable Excel performance workbooks contain summary, centre and unit sheets.
+
+Complaint and request registers at all levels
+---------------------------------------------
+- Student Support can download the filtered register as Excel or CSV.
+- Functional units, coordinators, regional administrators, monitoring officers and leadership can download Excel or CSV registers for only the cases they are permitted to see.
+- Sensitive complaints remain limited to the confidential handler and authorised Provost oversight.
+- Registers include workflow, SLA, student contact, centre, unit, survey and notification fields.
+- Spreadsheet formula-injection protection is applied to exported text.
+
+Optional production settings
+----------------------------
+SUPPORT_SMS_ENABLED=false
+SUPPORT_WHATSAPP_ENABLED=false
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_SMS_FROM=
+TWILIO_WHATSAPP_FROM=
+
+Set PUBLIC_BASE_URL so mobile and email alerts contain a valid secure tracking link. Keep the mobile switches false until the approved sender and production credentials have been tested.

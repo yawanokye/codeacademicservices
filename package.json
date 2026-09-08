@@ -1,12 +1,12 @@
 {
   "name": "codeacademicservices",
-  "version": "34.0.0",
+  "version": "35.0.0",
   "private": true,
   "description": "Codeacademicservices, the CoDE Academic Services Portal for submissions, claims, student support and centre coordination",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check admin/admin.js && node --check public/common.js && node --check public/student-support.js && node --check public/support-admin.js && node --check public/staff.js && node --check developer/developer.js && node --check operations/payroll.js && node --check operations/auditor.js"
+    "check": "node --check server.js && node --check admin/admin.js && node --check public/common.js && node --check public/student-support.js && node --check public/support-admin.js && node --check public/staff.js && node --check public/support-knowledge-base.js && node --check developer/developer.js && node --check operations/payroll.js && node --check operations/auditor.js"
   },
   "engines": {
     "node": ">=24.14.1 <25"

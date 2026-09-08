@@ -1,3 +1,14 @@
+# v35 update: Priority 3 service-quality improvements
+
+- A searchable knowledge base now covers frequently requested student services and opens preselected request forms.
+- The student satisfaction survey measures overall service, ease, communication, timeliness, courtesy, resolution, notifications and language assistance.
+- Optional SMS and WhatsApp alerts can be enabled through Twilio. Mobile alerts expose only the reference, stage and secure tracking link.
+- English, Twi and French assistance is available in the knowledge base, support guidance and mobile notices.
+- Protected service-performance reports compare study centres and functional units using caseload, SLA, satisfaction and resolution indicators.
+- Downloadable complaint and request registers are available to Student Support, functional units, centre and regional staff, monitoring roles and leadership, with existing confidentiality controls preserved.
+
+See `PATCH_NOTES_v35.txt` for configuration and the complete Priority 3 change list.
+
 # v34 update: Priority 2 Student Support service quality
 
 - Category-specific preparation guidance now explains expected evidence, responsible unit and standard target before submission.
