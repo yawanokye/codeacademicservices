@@ -1,23 +1,176 @@
-(function(){
-  const list=document.getElementById('ticketList'),summary=document.getElementById('queueSummary'),message=document.getElementById('adminMessage');
-  const statuses=['received','triaged','assigned','evidence-requested','lacks-evidence','investigation-ongoing','in-progress','awaiting-student','resolved','reopened','final-decision','closed'];
-  const labels={'evidence-requested':'Additional evidence requested','lacks-evidence':'Complaint lacks evidence','investigation-ongoing':'Investigation ongoing','awaiting-student':'Awaiting student','in-progress':'In progress','final-decision':'Final decision issued',resolved:'Complaint resolved'};
-  const functionalUnits={'student-support':'Student Support Services Unit','general-office':'General Office','student-records':'Student Records Management Unit','college-registrar':'College Registrar',provost:'Provost','directorate-education-business':'Directorate of Education and Business Studies','directorate-arts-stem':'Directorate of Arts and STEM Studies','academic-departments':'Academic Departments',examinations:'Examinations Unit',payroll:'Payroll Portal',auditor:"Auditor's Portal",'regional-administrator':'Regional Administrators',coordinator:'Centre Coordinators','quality-assurance':'Quality Assurance Unit','college-finance':'College Finance Officer',admissions:'Admissions Unit',stores:'Stores Unit'};
-  const routingDefaults={'incomplete-result':'student-records','fees-payment':'college-finance',certificate:'college-registrar','change-of-name':'college-registrar',transcript:'general-office','programme-department':'academic-departments','assessment-project':'academic-departments'};
-  const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
-  const date=value=>value?new Date(value).toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'}):'Not available';
-  const evidencePath=(ticket,index,officer=false)=>`/api/support/admin/tickets/${encodeURIComponent(ticket.id)}/${officer?'officer-evidence':'evidence'}/${index}`;
-  const unitOptions=(selected='',includeBlank=true)=>`${includeBlank?'<option value="">Select functional unit</option>':''}${Object.entries(functionalUnits).map(([id,label])=>`<option value="${id}" ${id===selected?'selected':''}>${esc(label)}</option>`).join('')}`;
-  function show(text,ok){message.textContent=text;message.className=`status show ${ok?'ok':'bad'}`;}
-  function evidence(ticket,files=ticket.evidence,officer=false){if(!files?.length)return '<p class="admin-ticket-empty">No files attached.</p>';return `<div class="evidence-list">${files.map((file,index)=>{const url=evidencePath(ticket,index,officer),name=esc(file.originalName||`Evidence ${index+1}`);return `<section class="evidence-item"><strong>${name}</strong><iframe class="evidence-frame" src="${url}" title="${name}"></iframe><a href="${url}" target="_blank" rel="noopener">Open in new tab</a></section>`;}).join('')}</div>`;}
-  function activity(ticket){const rows=ticket.studentUpdates||[];return rows.length?`<ul class="case-history">${rows.slice(-8).reverse().map(item=>`<li><strong>${esc(item.label)}</strong><span>${esc(date(item.at))}</span><p>${esc(item.message)}</p></li>`).join('')}</ul>`:'<p class="admin-ticket-empty">No student-facing case updates yet.</p>';}
-  function referralHistory(ticket){const rows=ticket.referrals||[];return rows.length?`<ul class="case-history">${rows.slice(-8).reverse().map(item=>`<li><strong>${esc(item.sourceLabel||functionalUnits[item.sourceUnit]||item.sourceUnit)} → ${esc(item.targetLabel||functionalUnits[item.targetUnit]||item.targetUnit)}</strong><span>${esc(date(item.createdAt))}</span><p>${esc(item.comment||'No routing comments recorded.')} <em>(${esc(item.status||'registered')})</em></p></li>`).join('')}</ul>`:'<p class="admin-ticket-empty">No functional-unit referral has been registered yet.</p>';}
-  function card(ticket){const options=statuses.map(status=>`<option value="${status}" ${status===ticket.status?'selected':''}>${esc(labels[status]||status[0].toUpperCase()+status.slice(1))}</option>`).join('');const forwards=ticket.forwardHistory?.length?`<p class="forward-history">Email forwards: ${ticket.forwardHistory.map(item=>`${esc(item.officeName)} (${esc(item.status||'pending')})`).join(' · ')}</p>`:'';const messages=ticket.interUnitMessages?.length?`<p class="forward-history">Inter-unit messages: ${ticket.interUnitMessages.map(item=>`${esc(item.recipientName)} (${esc(item.status||'pending')})`).join(' · ')}</p>`:'';return `<article class="admin-ticket" data-id="${esc(ticket.id)}"><div class="admin-ticket-head"><div><span class="ticket-ref">${esc(ticket.reference)}</span><h3>${esc(ticket.subject)}</h3><p>${esc(ticket.name)} · ${esc(ticket.email)}${ticket.studyCentre?` · ${esc(ticket.studyCentre)}`:''}</p></div><span class="ticket-priority">${esc(ticket.priority)}</span></div><div class="admin-ticket-meta"><span><strong>Type</strong>${ticket.type==='service-request'?'Service request':'Complaint'}</span><span><strong>Learner level</strong>${esc(ticket.studyLevel||'Not stated')}</span><span><strong>Category</strong>${esc(ticket.category)}</span><span><strong>Owner</strong>${esc(ticket.ownerUnit)}</span><span><strong>Target</strong>${esc(date(ticket.dueAt))}</span></div><p class="admin-ticket-description">${esc(ticket.description)}</p><section class="evidence-panel"><h4>Student evidence</h4>${evidence(ticket)}</section><section class="evidence-panel"><h4>Officer evidence</h4>${evidence(ticket,ticket.officerEvidence||[],true)}<form class="officer-evidence-form" enctype="multipart/form-data"><div class="field"><label>Add officer evidence</label><input name="evidenceFiles" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.webp,.txt"></div><div class="field"><label>Evidence note</label><input name="note" placeholder="Source or relevance of this evidence"></div><button class="btn secondary" type="submit">Attach officer evidence</button></form></section><section class="case-update-panel"><h4>Record case update and notify student</h4><p>Select the case position, then provide the clear message that should appear in the student tracking page and email.</p><div class="admin-ticket-actions"><label>Case position<select class="ticket-status">${options}</select></label><label>Responsible unit<input class="ticket-owner" value="${esc(ticket.ownerUnit)}"></label><label>Student message / decision<textarea class="ticket-note" placeholder="Explain the investigation stage, evidence required, resolution or final decision."></textarea></label><button class="btn save-ticket" type="button">Save and notify student</button></div></section><section class="evidence-panel"><h4>Student-facing progress</h4>${activity(ticket)}</section><section class="forward-panel"><div><h4>Request information from another unit</h4><p>Send a traceable request for information while the case is under review.</p></div><div class="forward-fields"><label>Unit or office<input class="message-recipient-name" placeholder="e.g. Examinations Unit"></label><label>Official unit email<input class="message-recipient-email" type="email" placeholder="office@ucc.edu.gh"></label><label class="forward-comment">Information required<textarea class="message-text" placeholder="State the information or verification required and the case reference context."></textarea></label><button class="btn message-unit" type="button">Send information request</button></div>${messages}</section><section class="forward-panel"><div><h4>Forward to responsible office</h4><p>Register the shared case in the receiving unit's portal and send its confidential evidence frame by email.</p></div><div class="forward-fields"><label>Receiving functional unit<select class="forward-recipient-unit">${unitOptions()}</select></label><label>Office name<input class="forward-office-name" placeholder="e.g. Student Records Management Unit"></label><label>Official office email<input class="forward-office-email" type="email" placeholder="office@ucc.edu.gh"></label><label class="forward-comment">Student Support comments<textarea class="forward-comment-text" placeholder="State the action required and any screening or routing comments."></textarea></label><button class="btn forward-ticket" type="button">Register and forward ticket</button></div>${forwards}</section><section class="forward-panel"><div><h4>Shared referral register</h4><p>Both sending and receiving units can see the case reference and reassignment history. The named officer remains accountable until the handover is accepted.</p></div>${referralHistory(ticket)}<div class="forward-fields"><label>Reassign to functional unit<select class="reassign-recipient-unit">${unitOptions()}</select></label><label class="forward-comment">Reassignment comments<textarea class="reassign-comment" placeholder="Explain why this unit should take the next action."></textarea></label><button class="btn secondary reassign-ticket" type="button">Reassign case</button></div></section></article>`;}
-  async function load(){list.innerHTML='<div class="resource-section">Loading support queue…</div>';try{const response=await fetch('/api/support/admin/tickets'),data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'The support queue could not be loaded.');const tickets=data.tickets||[];summary.textContent=`${tickets.length} ticket${tickets.length===1?'':'s'} · ${tickets.filter(ticket=>!['resolved','final-decision','closed'].includes(ticket.status)).length} open`;list.innerHTML=tickets.length?tickets.map(card).join(''):'<div class="resource-section">No support tickets have been received.</div>';list.querySelectorAll('.save-ticket').forEach(button=>button.addEventListener('click',save));list.querySelectorAll('.forward-ticket').forEach(button=>button.addEventListener('click',forward));list.querySelectorAll('.reassign-ticket').forEach(button=>button.addEventListener('click',reassign));list.querySelectorAll('.message-unit').forEach(button=>button.addEventListener('click',sendMessage));list.querySelectorAll('.officer-evidence-form').forEach(form=>form.addEventListener('submit',uploadOfficerEvidence));}catch(error){list.innerHTML='';show(error.message||'The support queue could not be loaded.',false);}}
-  async function save(event){const article=event.currentTarget.closest('.admin-ticket'),button=event.currentTarget,body={status:article.querySelector('.ticket-status').value,ownerUnit:article.querySelector('.ticket-owner').value,note:article.querySelector('.ticket-note').value};button.disabled=true;try{const response=await fetch(`/api/support/admin/tickets/${encodeURIComponent(article.dataset.id)}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'The case update could not be saved.');show(`Updated ${data.ticket.reference} and notified the student.`,true);load();}catch(error){show(error.message||'The case update could not be saved.',false);button.disabled=false;}}
-  async function uploadOfficerEvidence(event){event.preventDefault();const form=event.currentTarget,article=form.closest('.admin-ticket'),button=form.querySelector('button'),body=new FormData(form);button.disabled=true;try{const response=await fetch(`/api/support/admin/tickets/${encodeURIComponent(article.dataset.id)}/officer-evidence`,{method:'POST',body}),data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'Officer evidence could not be attached.');show('Officer evidence attached to the case.',true);load();}catch(error){show(error.message||'Officer evidence could not be attached.',false);button.disabled=false;}}
-  async function sendMessage(event){const article=event.currentTarget.closest('.admin-ticket'),button=event.currentTarget,body={recipientName:article.querySelector('.message-recipient-name').value,recipientEmail:article.querySelector('.message-recipient-email').value,message:article.querySelector('.message-text').value};button.disabled=true;try{const response=await fetch(`/api/support/admin/tickets/${encodeURIComponent(article.dataset.id)}/messages`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'The information request could not be sent.');show(`Information request sent for ${data.reference}.`,true);load();}catch(error){show(error.message||'The information request could not be sent.',false);button.disabled=false;}}
-  async function forward(event){const article=event.currentTarget.closest('.admin-ticket'),button=event.currentTarget,body={recipientUnit:article.querySelector('.forward-recipient-unit').value,officeName:article.querySelector('.forward-office-name').value,officeEmail:article.querySelector('.forward-office-email').value,comment:article.querySelector('.forward-comment-text').value};button.disabled=true;try{const response=await fetch(`/api/support/admin/tickets/${encodeURIComponent(article.dataset.id)}/forward`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'The ticket could not be forwarded.');show(data.emailStatus==='sent'?`Registered and forwarded ${data.reference}. The confidential link expires ${date(data.expiresAt)}.`:(data.message||`Registered ${data.reference} in the receiving unit portal.`),true);load();}catch(error){show(error.message||'The ticket could not be forwarded.',false);button.disabled=false;}}
-  async function reassign(event){const article=event.currentTarget.closest('.admin-ticket'),button=event.currentTarget,body={targetUnit:article.querySelector('.reassign-recipient-unit').value,note:article.querySelector('.reassign-comment').value};button.disabled=true;try{const response=await fetch(`/api/support/admin/tickets/${encodeURIComponent(article.dataset.id)}/reassign`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'The case could not be reassigned.');show(`Reassigned ${data.reference} and notified the student.`,true);load();}catch(error){show(error.message||'The case could not be reassigned.',false);button.disabled=false;}}
-  document.getElementById('refreshTickets').addEventListener('click',load);load();
+(function () {
+  const $ = selector => document.querySelector(selector);
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[character]));
+  const date = value => value ? new Date(value).toLocaleString('en-GB', { dateStyle:'medium', timeStyle:'short' }) : 'Not available';
+  const statusLabels = { received:'Received', triaged:'Triaged', assigned:'Assigned', 'evidence-requested':'Additional evidence requested', 'lacks-evidence':'Additional evidence needed', 'investigation-ongoing':'Investigation ongoing', 'in-progress':'In progress', 'awaiting-student':'Awaiting student', resolved:'Resolved', reopened:'Reopened', appealed:'Appealed', 'final-decision':'Final decision issued', closed:'Closed' };
+  const statusKeys = ['received','triaged','assigned','evidence-requested','lacks-evidence','investigation-ongoing','in-progress','awaiting-student','resolved','reopened','appealed','final-decision','closed'];
+  const updateTemplates = {
+    evidence: { status:'evidence-requested', text:'Please provide the missing supporting record so the responsible unit can continue its review. Use the ticket tracking page to upload the file and add any necessary explanation.' },
+    investigation: { status:'investigation-ongoing', text:'The responsible unit is verifying the records connected to this matter. We will post the outcome or request further information through this ticket.' },
+    delay: { status:'in-progress', text:'We apologise that this matter is taking longer than expected. The case has been escalated for follow-up and remains active under the same reference.' },
+    resolution: { status:'resolved', text:'The responsible unit has completed its review. Please review the resolution recorded below and use the ticket controls to accept it, reopen the matter during the response period, or appeal.' }
+  };
+  let configuration = { units:[], categories:[] };
+  let identity = { role:'viewer', confidentialAccess:false };
+  let page = 1;
+  let pages = 1;
+
+  function show(text, ok) {
+    const element = $('#adminMessage');
+    element.textContent = text;
+    element.className = `status show ${ok ? 'ok' : 'bad'}`;
+    element.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  }
+  function selectOptions(items, selected, blankLabel) {
+    return `<option value="">${esc(blankLabel)}</option>${items.map(item => `<option value="${esc(item.id)}" ${item.id === selected ? 'selected' : ''}>${esc(item.label)}</option>`).join('')}`;
+  }
+  function slaBadge(ticket) {
+    const sla = ticket.sla || {};
+    const tone = sla.overdue ? 'overdue' : sla.atRisk ? 'risk' : sla.paused ? 'paused' : 'on-track';
+    const label = sla.overdue ? 'Overdue' : sla.atRisk ? 'At risk' : sla.paused ? 'SLA paused' : 'On track';
+    return `<span class="sla-badge ${tone}">${label}</span>`;
+  }
+  function evidence(ticket, files, collection) {
+    if (!files?.length) return '<p class="admin-ticket-empty">No files attached.</p>';
+    return `<div class="evidence-list">${files.map((file, index) => {
+      const name = esc(file.originalName || `Evidence ${index + 1}`);
+      const path = `/api/support/admin/tickets/${encodeURIComponent(ticket.id)}/${collection}/${index}`;
+      return `<section class="evidence-item"><strong>${name}</strong>${file.note ? `<small>${esc(file.note)}</small>` : ''}<iframe class="evidence-frame" src="${path}" title="Preview ${name}" loading="lazy"></iframe><div class="receipt-actions"><a class="btn secondary" href="${path}" target="_blank" rel="noopener">Open preview</a><a class="btn secondary" href="${path}?download=1">Download original</a></div></section>`;
+    }).join('')}</div>`;
+  }
+  function history(items, emptyText, audit) {
+    if (!items?.length) return `<p class="admin-ticket-empty">${esc(emptyText)}</p>`;
+    return `<ul class="case-history">${items.slice(-12).reverse().map(item => `<li><strong>${esc(audit ? item.action : item.label)}</strong><span>${esc(date(item.at))}${item.by ? ` · ${esc(item.by)}` : ''}</span>${item.message || item.note ? `<p>${esc(item.message || item.note)}</p>` : ''}</li>`).join('')}</ul>`;
+  }
+  function referralHistory(ticket) {
+    if (!ticket.referrals?.length) return '<p class="admin-ticket-empty">No referral has been registered.</p>';
+    return `<ul class="case-history">${ticket.referrals.slice().reverse().map(item => `<li><strong>${esc(item.sourceLabel || item.sourceUnit)} → ${esc(item.targetLabel || item.targetUnit)}</strong><span>${esc(date(item.createdAt))} · ${esc(item.status || 'registered')}</span><p>${esc(item.comment || 'No routing comment.')}</p></li>`).join('')}</ul>`;
+  }
+  function ticketCard(ticket) {
+    const canEdit = identity.role !== 'viewer';
+    const categories = selectOptions(configuration.categories, ticket.categoryKey, 'Keep current category');
+    const units = selectOptions(configuration.units, ticket.ownerUnitId, 'Keep current unit');
+    const routingUnits = selectOptions(configuration.units, '', 'Select functional unit');
+    const statuses = statusKeys.map(key => `<option value="${key}" ${key === ticket.status ? 'selected' : ''}>${esc(statusLabels[key])}</option>`).join('');
+    return `<details class="admin-ticket" data-id="${esc(ticket.id)}">
+      <summary class="admin-ticket-summary"><span><span class="ticket-ref">${esc(ticket.reference)}</span><strong>${esc(ticket.subject)}</strong><small>${esc(ticket.name)} · ${esc(ticket.category)} · ${esc(ticket.ownerUnit)}</small></span><span class="ticket-summary-badges">${ticket.sensitive ? '<span class="confidential-badge">Restricted</span>' : ''}${slaBadge(ticket)}<span class="ticket-priority">${esc(ticket.priority)}</span></span></summary>
+      <div class="ticket-body">
+        <div class="admin-ticket-meta"><span><strong>Status</strong>${esc(ticket.statusLabel)}</span><span><strong>Student</strong>${esc(ticket.email)}</span><span><strong>Study centre</strong>${esc(ticket.studyCentre || 'Not stated')}</span><span><strong>Programme</strong>${esc(ticket.programme || 'Not stated')}</span><span><strong>Resolution target</strong>${esc(date(ticket.dueAt))}</span><span><strong>Assigned officer</strong>${esc(ticket.assignedCaseOwner || 'Unassigned')}</span><span><strong>Student feedback</strong>${ticket.feedback ? `${esc(ticket.feedback.rating)}/5 · ${esc(ticket.feedback.resolved)}` : 'Not submitted'}</span></div>
+        <p class="admin-ticket-description">${esc(ticket.description)}</p>
+        ${ticket.feedback ? `<section class="feedback-detail"><h4>Student service feedback</h4><p><strong>${esc(ticket.feedback.rating)}/5 · Resolved: ${esc(ticket.feedback.resolved)}</strong></p><p>${esc(ticket.feedback.comment || 'No additional comment.')}</p><small>${esc(date(ticket.feedback.submittedAt))}</small></section>` : ''}
+        <div class="ticket-two-column"><section class="evidence-panel"><h4>Student evidence</h4>${evidence(ticket, ticket.evidence, 'evidence')}</section><section class="evidence-panel"><h4>Officer evidence</h4>${evidence(ticket, ticket.officerEvidence, 'officer-evidence')}${canEdit ? `<form class="officer-evidence-form" enctype="multipart/form-data"><label>Files<input name="evidenceFiles" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.webp,.txt"></label><label>Evidence note<input name="note" placeholder="Source and relevance"></label><button class="btn secondary" type="submit">Attach</button></form>` : ''}</section></div>
+        ${canEdit ? `<section class="case-update-panel"><h4>Classify, assign and update</h4><p>Every operational update is recorded in the audit trail. Student-facing notes appear in tracking and email when delivery is configured.</p><div class="case-controls"><label>Category<select class="ticket-category">${categories}</select></label><label>Priority<select class="ticket-priority-key"><option value="low" ${ticket.priorityKey === 'low' ? 'selected' : ''}>Low</option><option value="normal" ${ticket.priorityKey === 'normal' ? 'selected' : ''}>Normal</option><option value="high" ${ticket.priorityKey === 'high' ? 'selected' : ''}>High</option><option value="urgent" ${ticket.priorityKey === 'urgent' ? 'selected' : ''}>Urgent</option></select></label><label>Responsible unit<select class="ticket-owner-unit">${units}</select></label><label>Assigned officer<input class="ticket-assignee" value="${esc(ticket.assignedCaseOwner)}" placeholder="Officer name"></label><label>Case status<select class="ticket-status">${statuses}</select></label><label>Response template<select class="update-template"><option value="">Write a custom update</option><option value="evidence">Request missing evidence</option><option value="investigation">Investigation underway</option><option value="delay">Delay and escalation notice</option><option value="resolution">Resolution ready</option></select></label><label class="wide">Student-facing update<textarea class="ticket-note" placeholder="Required for evidence requests, investigation updates and decisions"></textarea></label><button class="btn save-ticket" type="button">Save and notify</button></div></section>` : '<p class="staff-restricted">Your viewer role is read-only.</p>'}
+        <div class="ticket-two-column"><section class="evidence-panel"><h4>Student-facing progress</h4>${history(ticket.studentUpdates, 'No student-facing updates yet.', false)}</section><section class="evidence-panel"><h4>Audit trail</h4>${history(ticket.auditTrail, 'No audit entries yet.', true)}</section></div>
+        ${canEdit ? `<section class="routing-grid"><div class="forward-panel"><h4>Request information</h4><p>Uses the selected unit's active institutional officer accounts.</p><label>Functional unit<select class="message-unit">${routingUnits}</select></label><label>Information required<textarea class="message-text"></textarea></label><button class="btn secondary message-unit-button" type="button">Send request</button></div><div class="forward-panel"><h4>Register and forward</h4><p>Creates the receiving unit's shared case record even when email is unavailable.</p><label>Receiving unit<select class="forward-unit">${routingUnits}</select></label><label>Routing instructions<textarea class="forward-note"></textarea></label><button class="btn forward-ticket" type="button">Forward case</button></div><div class="forward-panel"><h4>Reassign case</h4><p>Preserves the permanent reference and the full handover history.</p><label>Next unit<select class="reassign-unit">${routingUnits}</select></label><label>Reason for reassignment<textarea class="reassign-note"></textarea></label><button class="btn secondary reassign-ticket" type="button">Reassign</button></div></section>` : ''}
+        <section class="evidence-panel"><h4>Referral history</h4>${referralHistory(ticket)}</section>
+      </div>
+    </details>`;
+  }
+  function bindTicketActions() {
+    document.querySelectorAll('.save-ticket').forEach(button => button.addEventListener('click', saveTicket));
+    document.querySelectorAll('.officer-evidence-form').forEach(form => form.addEventListener('submit', uploadEvidence));
+    document.querySelectorAll('.message-unit-button').forEach(button => button.addEventListener('click', sendUnitMessage));
+    document.querySelectorAll('.forward-ticket').forEach(button => button.addEventListener('click', forwardTicket));
+    document.querySelectorAll('.reassign-ticket').forEach(button => button.addEventListener('click', reassignTicket));
+    document.querySelectorAll('.update-template').forEach(select => select.addEventListener('change', applyUpdateTemplate));
+  }
+  function applyUpdateTemplate(event) {
+    const template = updateTemplates[event.currentTarget.value];
+    if (!template) return;
+    const article = event.currentTarget.closest('.admin-ticket');
+    article.querySelector('.ticket-status').value = template.status;
+    article.querySelector('.ticket-note').value = template.text;
+  }
+  async function request(article, suffix, options, success) {
+    const response = await fetch(`/api/support/admin/tickets/${encodeURIComponent(article.dataset.id)}${suffix}`, options);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'The action could not be completed.');
+    show(success(data), true);
+    await load();
+  }
+  async function saveTicket(event) {
+    const article = event.currentTarget.closest('.admin-ticket');
+    event.currentTarget.disabled = true;
+    const body = { categoryKey:article.querySelector('.ticket-category').value, priorityKey:article.querySelector('.ticket-priority-key').value, ownerUnitId:article.querySelector('.ticket-owner-unit').value, assignedCaseOwner:article.querySelector('.ticket-assignee').value, status:article.querySelector('.ticket-status').value, note:article.querySelector('.ticket-note').value };
+    try { await request(article, '', { method:'PATCH', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) }, data => `Updated ${data.ticket.reference}.`); } catch (error) { show(error.message, false); event.currentTarget.disabled = false; }
+  }
+  async function uploadEvidence(event) {
+    event.preventDefault();
+    const article = event.currentTarget.closest('.admin-ticket');
+    const button = event.currentTarget.querySelector('button');
+    button.disabled = true;
+    try { await request(article, '/officer-evidence', { method:'POST', body:new FormData(event.currentTarget) }, () => 'Officer evidence attached.'); } catch (error) { show(error.message, false); button.disabled = false; }
+  }
+  async function sendUnitMessage(event) {
+    const article = event.currentTarget.closest('.admin-ticket');
+    const body = { targetUnit:article.querySelector('.message-unit').value, message:article.querySelector('.message-text').value };
+    event.currentTarget.disabled = true;
+    try { await request(article, '/messages', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) }, data => `Information request recorded for ${data.reference}.`); } catch (error) { show(error.message, false); event.currentTarget.disabled = false; }
+  }
+  async function forwardTicket(event) {
+    const article = event.currentTarget.closest('.admin-ticket');
+    const body = { recipientUnit:article.querySelector('.forward-unit').value, comment:article.querySelector('.forward-note').value };
+    event.currentTarget.disabled = true;
+    try { await request(article, '/forward', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) }, data => data.message || `Registered ${data.reference} with the receiving unit.`); } catch (error) { show(error.message, false); event.currentTarget.disabled = false; }
+  }
+  async function reassignTicket(event) {
+    const article = event.currentTarget.closest('.admin-ticket');
+    const body = { targetUnit:article.querySelector('.reassign-unit').value, note:article.querySelector('.reassign-note').value };
+    event.currentTarget.disabled = true;
+    try { await request(article, '/reassign', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) }, data => `Reassigned ${data.reference}.`); } catch (error) { show(error.message, false); event.currentTarget.disabled = false; }
+  }
+  function queryString() {
+    const parameters = new URLSearchParams({ page:String(page), pageSize:'25' });
+    [['search','#filterSearch'],['status','#filterStatus'],['category','#filterCategory'],['priority','#filterPriority'],['confidentiality','#filterConfidentiality']].forEach(([name, selector]) => { const value = $(selector).value.trim(); if (value) parameters.set(name, value); });
+    return parameters.toString();
+  }
+  async function load() {
+    $('#ticketList').innerHTML = '<div class="resource-section">Loading support queue…</div>';
+    try {
+      const response = await fetch(`/api/support/admin/tickets?${queryString()}`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'The support queue could not be loaded.');
+      pages = data.pages || 1;
+      page = Math.min(data.page || 1, pages);
+      $('#queueSummary').textContent = `${data.total} matching case${data.total === 1 ? '' : 's'} · ${data.permissionTotal} visible to you`;
+      $('#pageSummary').textContent = `Page ${page} of ${pages}`;
+      $('#previousPage').disabled = page <= 1;
+      $('#nextPage').disabled = page >= pages;
+      $('#ticketList').innerHTML = data.tickets?.length ? data.tickets.map(ticketCard).join('') : '<div class="resource-section">No cases match these filters.</div>';
+      bindTicketActions();
+    } catch (error) { $('#ticketList').innerHTML = ''; show(error.message, false); }
+  }
+  async function initialise() {
+    try {
+      const [configResponse, identityResponse] = await Promise.all([fetch('/api/support/config'), fetch('/api/support/admin/me')]);
+      const configData = await configResponse.json();
+      const identityData = await identityResponse.json();
+      if (!configResponse.ok || !identityResponse.ok) throw new Error(identityData.error || configData.error || 'The workspace could not be initialised.');
+      configuration = configData;
+      identity = identityData.identity;
+      $('#accessSummary').textContent = `${identity.name} · ${identity.role === 'viewer' ? 'read-only monitoring' : 'operational case management'}${identity.confidentialAccess ? ' · restricted-case access' : ''}.`;
+      $('#filterStatus').insertAdjacentHTML('beforeend', statusKeys.map(key => `<option value="${key}">${esc(statusLabels[key])}</option>`).join(''));
+      $('#filterCategory').insertAdjacentHTML('beforeend', configuration.categories.map(item => `<option value="${esc(item.id)}">${esc(item.label)}</option>`).join(''));
+      if (!identity.confidentialAccess) $('#filterConfidentiality').closest('label').hidden = true;
+      await load();
+    } catch (error) { show(error.message, false); }
+  }
+  $('#queueFilters').addEventListener('submit', event => { event.preventDefault(); page = 1; load(); });
+  $('#clearFilters').addEventListener('click', () => { $('#queueFilters').reset(); page = 1; load(); });
+  $('#refreshTickets').addEventListener('click', async () => {
+    const button = $('#refreshTickets');
+    button.disabled = true;
+    try {
+      const response = await fetch('/api/support/admin/lifecycle/refresh', { method:'POST' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'The service-level refresh could not be completed.');
+      await load();
+      show('Queue and service-level flags refreshed.', true);
+    } catch (error) { show(error.message, false); }
+    finally { button.disabled = false; }
+  });
+  $('#exportQueue').addEventListener('click', () => { window.location.href = `/api/support/admin/tickets.csv?${queryString()}`; });
+  $('#previousPage').addEventListener('click', () => { if (page > 1) { page -= 1; load(); } });
+  $('#nextPage').addEventListener('click', () => { if (page < pages) { page += 1; load(); } });
+  initialise();
 })();

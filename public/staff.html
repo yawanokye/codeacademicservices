@@ -1,3 +1,17 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Functional Units Staff Portal | Codeacademicservices</title><link rel="stylesheet" href="/styles.css"></head><body class="staff-page">
-<header class="topbar"><div class="brand"><img src="/ucc-logo.png" alt="UCC logo"><div><h1>Codeacademicservices</h1><small>Functional Units Staff Portal</small></div></div><div class="service-nav"><a href="/">Home</a><a href="/admin">Department administration</a><a href="/admin/logout">Sign out</a></div></header>
-<main class="support-shell"><div class="page-intro"><span class="eyebrow">Protected staff workspace</span><h2 id="welcome">Loading workspace</h2><p id="accessSummary">Checking your account permissions.</p></div><section id="staffMetrics" class="staff-metrics"></section><section id="leadershipDashboards"><div class="section-intro"><h2>Monitoring dashboards</h2><p>Aggregated non-sensitive complaint and service-request statistics for oversight and follow-up.</p></div><div id="dashboardList" class="dashboard-list"></div></section><section><div class="section-intro"><h2>Your functional units</h2><p>Your account can hold more than one unit assignment. Access is limited to the role issued for each account.</p></div><div id="unitCards" class="staff-unit-grid"></div></section><section id="referralsSection"><div class="section-intro"><h2>Shared referrals</h2><p>Cases referred to your unit are registered here with their evidence and full reassignment trail.</p></div><div id="referralList" class="staff-referral-list"></div></section><div id="staffMessage" class="status" role="status"></div></main><footer>Codeacademicservices · Functional Units Staff Portal · University of Cape Coast</footer><script src="/staff.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Functional Units Staff Portal | Codeacademicservices</title><link rel="stylesheet" href="/styles.css"></head>
+<body class="staff-page">
+  <header class="topbar"><div class="brand"><img src="/ucc-logo.png" alt="UCC logo"><div><h1>Codeacademicservices</h1><small>Functional Units Staff Portal</small></div></div><nav class="service-nav"><a href="/">Home</a><a href="/admin">Department administration</a><a href="/admin/logout">Sign out</a></nav></header>
+  <main class="support-shell">
+    <div class="page-intro"><span class="eyebrow">Protected staff workspace</span><h2 id="welcome">Loading workspace</h2><p id="accessSummary">Checking your account permissions.</p></div>
+    <section id="staffMetrics" class="staff-metrics"></section>
+    <section id="leadershipDashboards"><div class="section-intro"><h2>Monitoring dashboards</h2><p>Service levels and trends for the cases your assigned role is permitted to monitor.</p></div><div id="dashboardList" class="dashboard-list"></div></section>
+    <section><div class="section-intro"><h2>Your functional units</h2><p>Open a specialist workspace where available. Your role controls whether actions are read-only or operational.</p></div><div id="unitCards" class="staff-unit-grid"></div></section>
+    <section id="referralsSection"><div class="section-intro referral-heading"><div><h2>Shared referrals</h2><p>Accept, investigate, update, resolve, or reassign cases while preserving the permanent reference and audit trail.</p></div><label>Filter referrals<input id="referralSearch" type="search" placeholder="Reference, student, subject…"></label></div><div id="referralList" class="staff-referral-list"></div></section>
+    <div id="staffMessage" class="status" role="status" aria-live="polite"></div>
+  </main>
+  <footer>Codeacademicservices · Functional Units Staff Portal · University of Cape Coast</footer>
+  <script src="/staff.js"></script>
+</body>
+</html>

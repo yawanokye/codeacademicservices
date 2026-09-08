@@ -1,1 +1,33 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Support Triage | Codeacademicservices</title><link rel="stylesheet" href="/styles.css"></head><body class="support-admin-page"><header class="topbar"><div class="brand"><img src="/ucc-logo.png" alt="University of Cape Coast logo"><div><h1>Codeacademicservices</h1><small>Student Support Services triage</small></div></div><a class="navlink" href="/">Home</a></header><main class="support-shell"><div class="page-intro"><span class="eyebrow">Protected staff workspace</span><h2>Support Services triage</h2><p>Screen incoming complaints and service requests, assign the responsible unit, and keep the reference history current.</p></div><div class="support-admin-toolbar"><button class="btn" id="refreshTickets" type="button">Refresh queue</button><span id="queueSummary">Loading…</span></div><div id="adminMessage" class="status" role="status" aria-live="polite"></div><section class="admin-ticket-list" id="ticketList"></section></main><footer>Codeacademicservices · Student Support Services</footer><script src="/support-admin.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Support Triage | Codeacademicservices</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="support-admin-page">
+  <header class="topbar">
+    <div class="brand"><img src="/ucc-logo.png" alt="University of Cape Coast logo"><div><h1>Codeacademicservices</h1><small>Student Support Services triage</small></div></div>
+    <nav class="service-nav" aria-label="Staff navigation"><a href="/staff">Staff workspace</a><a href="/">Home</a><a href="/admin/logout">Sign out</a></nav>
+  </header>
+  <main class="support-shell">
+    <div class="page-intro compact"><span class="eyebrow">Protected staff workspace</span><h2>Support Services triage</h2><p id="accessSummary">Loading your queue permissions…</p></div>
+    <form id="queueFilters" class="queue-filters">
+      <label class="filter-search">Search<input id="filterSearch" type="search" placeholder="Reference, student, subject, centre…"></label>
+      <label>Status<select id="filterStatus"><option value="">All statuses</option></select></label>
+      <label>Category<select id="filterCategory"><option value="">All categories</option></select></label>
+      <label>Priority<select id="filterPriority"><option value="">All priorities</option><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></label>
+      <label>Confidentiality<select id="filterConfidentiality"><option value="">All permitted cases</option><option value="standard">Standard</option><option value="restricted">Restricted</option></select></label>
+      <button class="btn" type="submit">Apply filters</button>
+      <button class="btn secondary" id="clearFilters" type="button">Clear</button>
+    </form>
+    <div class="support-admin-toolbar"><button class="btn secondary" id="refreshTickets" type="button">Refresh queue</button><button class="btn secondary" id="exportQueue" type="button">Export matching CSV</button><span id="queueSummary">Loading…</span></div>
+    <div id="adminMessage" class="status" role="status" aria-live="polite"></div>
+    <section class="admin-ticket-list" id="ticketList" aria-live="polite"></section>
+    <nav class="queue-pagination" aria-label="Queue pages"><button class="btn secondary" id="previousPage" type="button">Previous</button><span id="pageSummary"></span><button class="btn secondary" id="nextPage" type="button">Next</button></nav>
+  </main>
+  <footer>Codeacademicservices · Student Support Services · University of Cape Coast</footer>
+  <script src="/support-admin.js"></script>
+</body>
+</html>
