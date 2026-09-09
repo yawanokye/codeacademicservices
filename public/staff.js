@@ -7,6 +7,26 @@
   let referrals = [];
   let reportOptionsLoaded = false;
 
+  function requireAuthentication(response) {
+    if (response.status !== 401) return;
+    const next = `${location.pathname}${location.search}`;
+    location.href = `/staff-login.html?next=${encodeURIComponent(next)}`;
+    throw new Error('Your staff session has expired. Redirecting to sign in.');
+  }
+  function showDeveloperPreviewBanner(staff) {
+    const banner = document.getElementById('developerPreviewBanner');
+    if (!banner) return;
+    if (!staff?.developerPreview) { banner.hidden = true; banner.innerHTML = ''; return; }
+    const label = staff.developerPreviewLabel || staff.name || 'functional-unit user';
+    const expiry = staff.previewExpiresAt ? ` Preview expires ${date(staff.previewExpiresAt)}.` : '';
+    banner.hidden = false;
+    banner.innerHTML = `<div><strong>Developer Preview Mode</strong><span>Viewing as ${esc(label)}.${esc(expiry)}</span></div><div class="developer-preview-actions"><a href="/developer#staff-preview">Return to Developer Portal</a><button type="button" id="exitDeveloperPreview">Exit preview</button></div>`;
+    banner.querySelector('#exitDeveloperPreview').addEventListener('click', async () => {
+      await fetch('/api/admin-logout', { method:'POST' }).catch(() => {});
+      location.href = '/developer#staff-preview';
+    });
+  }
+
   function show(text, ok) {
     const element = document.getElementById('staffMessage');
     element.textContent = text;
@@ -31,6 +51,18 @@
   function dashboard(item) {
     const metrics = [['Total',item.total],['Open',item.open],['Resolved',item.resolved],['Overdue',item.overdue],['At risk',item.atRisk],['Awaiting evidence',item.awaitingEvidence],['SLA compliance',item.slaCompliancePercent === null ? '—' : `${item.slaCompliancePercent}%`],['Satisfaction',item.averageSatisfaction === null ? '—' : `${item.averageSatisfaction}/5`],['Ease',item.averageEaseOfUse === null ? '—' : `${item.averageEaseOfUse}/5`],['Communication',item.averageCommunication === null ? '—' : `${item.averageCommunication}/5`],['Timeliness',item.averageTimeliness === null ? '—' : `${item.averageTimeliness}/5`],['Courtesy',item.averageStaffCourtesy === null ? '—' : `${item.averageStaffCourtesy}/5`],['Feedback',item.feedbackResponses],['Low ratings',item.lowRatings],['Reopened',item.reopened],['Appealed',item.appealed],['First response',hours(item.averageFirstResponseHours)],['Resolution',hours(item.averageResolutionHours)]];
     return `<article class="dashboard-card"><h3>${esc(item.label)}</h3><div class="dashboard-metrics">${metrics.map(([label, value]) => `<span><strong>${value}</strong>${label}</span>`).join('')}</div><div class="dashboard-columns"><section><h4>By category</h4>${breakdown(item.categoryBreakdown)}</section><section><h4>By status</h4>${breakdown(item.statusBreakdown)}</section><section><h4>By study centre</h4>${breakdown(item.centreBreakdown)}</section></div></article>`;
+  }
+  function statusClass(status) { return `status-${String(status || 'unknown').replace(/[^a-z0-9-]/g, '')}`; }
+  function renderMonitoringStatistics(data) {
+    const overview = data.overview || {};
+    const headline = [['Total cases',overview.total ?? 0,'total'],['Complaints',overview.complaints ?? 0,'complaint'],['Service requests',overview.requests ?? 0,'request'],['Open',overview.open ?? 0,'open'],['Overdue',overview.overdue ?? 0,'overdue'],['Resolved or closed',overview.resolved ?? 0,'resolved']];
+    document.getElementById('monitoringOverview').innerHTML = headline.map(([label,value,tone]) => `<article class="monitoring-stat ${tone}"><span>${esc(label)}</span><strong>${esc(value)}</strong></article>`).join('');
+    const statuses = data.statusStatistics || [];
+    document.getElementById('statusStatistics').innerHTML = `<div class="monitoring-subhead"><h3>Cases by status</h3><p>Every workflow status is shown, including statuses with no current cases.</p></div><div class="status-stat-grid">${statuses.map(item => `<article class="status-stat ${statusClass(item.id)}"><span>${esc(item.label)}</span><strong>${esc(item.count)}</strong></article>`).join('')}</div>`;
+    const units = data.unitStatistics || [];
+    const statusHeaders = statuses.map(item => `<th class="${statusClass(item.id)}">${esc(item.label)}</th>`).join('');
+    const rows = units.map(unit => `<tr><th scope="row">${esc(unit.label)}</th><td class="type-complaint">${esc(unit.complaints)}</td><td class="type-request">${esc(unit.requests)}</td><td><strong>${esc(unit.total)}</strong></td>${statuses.map(status => `<td class="status-count ${statusClass(status.id)}">${esc(unit.statusCounts?.[status.id] ?? 0)}</td>`).join('')}</tr>`).join('');
+    document.getElementById('unitStatistics').innerHTML = `<div class="monitoring-subhead"><h3>Complaints and requests by functional unit</h3><p>Scroll horizontally to review every status for every unit in your permitted monitoring scope.</p></div><div class="unit-status-table-wrap"><table class="unit-status-table"><thead><tr><th>Functional unit</th><th class="type-complaint">Complaints</th><th class="type-request">Requests</th><th>Total</th>${statusHeaders}</tr></thead><tbody>${rows}</tbody></table></div>`;
   }
   function evidence(ticket, files, collection) {
     if (!files?.length) return '<p class="admin-ticket-empty">No files attached.</p>';
@@ -99,22 +131,26 @@
     const query=reportQueryString();
     const suffix=query?`?${query}`:'';
     const [dashboardResponse,performanceResponse]=await Promise.all([fetch(`/api/staff/dashboard${suffix}`),fetch(`/api/staff/support-performance${suffix}`)]);
+    requireAuthentication(dashboardResponse); requireAuthentication(performanceResponse);
     const dashboardData=await dashboardResponse.json().catch(()=>({}));
     const performanceData=await performanceResponse.json().catch(()=>({}));
     if(!dashboardResponse.ok||!performanceResponse.ok) throw new Error(dashboardData.error||performanceData.error||'Could not load the service report.');
     const dashboards=dashboardData.dashboards||[];
-    document.getElementById('leadershipDashboards').hidden=!dashboards.length;
+    document.getElementById('leadershipDashboards').hidden=!dashboards.length && !(dashboardData.unitStatistics||[]).length;
+    renderMonitoringStatistics(dashboardData);
     document.getElementById('dashboardList').innerHTML=dashboards.map(dashboard).join('');
     renderPerformance(performanceData);
   }
   async function load() {
     try {
       const [meResponse, referralResponse, optionsResponse] = await Promise.all([fetch('/api/staff/me'), fetch('/api/staff/referrals'), fetch('/api/staff/support-report-options')]);
+      requireAuthentication(meResponse); requireAuthentication(referralResponse); requireAuthentication(optionsResponse);
       const meData = await meResponse.json().catch(() => ({}));
       const referralData = await referralResponse.json().catch(() => ({}));
       const optionsData = await optionsResponse.json().catch(() => ({}));
       if (!meResponse.ok || !referralResponse.ok || !optionsResponse.ok) throw new Error(meData.error || referralData.error || optionsData.error || 'Could not load the staff workspace.');
       currentStaff = meData.staff;
+      showDeveloperPreviewBanner(currentStaff);
       referrals = referralData.referrals || [];
       document.getElementById('welcome').textContent = `Welcome, ${currentStaff.name}`;
       document.getElementById('accessSummary').textContent = `${roleLabels[currentStaff.role] || currentStaff.role}. ${currentStaff.units.length} assigned functional unit${currentStaff.units.length === 1 ? '' : 's'}.`;

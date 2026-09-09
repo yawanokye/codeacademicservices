@@ -15,6 +15,26 @@
   let page = 1;
   let pages = 1;
 
+  function requireAuthentication(response) {
+    if (response.status !== 401) return;
+    const next = `${location.pathname}${location.search}`;
+    location.href = `/staff-login.html?next=${encodeURIComponent(next)}`;
+    throw new Error('Your staff session has expired. Redirecting to sign in.');
+  }
+  function showDeveloperPreviewBanner(currentIdentity) {
+    const banner = $('#developerPreviewBanner');
+    if (!banner) return;
+    if (!currentIdentity?.developerPreview) { banner.hidden = true; banner.innerHTML = ''; return; }
+    const label = currentIdentity.developerPreviewLabel || currentIdentity.name || 'Student Support officer';
+    const expiry = currentIdentity.previewExpiresAt ? ` Preview expires ${date(currentIdentity.previewExpiresAt)}.` : '';
+    banner.hidden = false;
+    banner.innerHTML = `<div><strong>Developer Preview Mode</strong><span>Viewing as ${esc(label)}.${esc(expiry)}</span></div><div class="developer-preview-actions"><a href="/developer#staff-preview">Return to Developer Portal</a><button type="button" id="exitDeveloperPreview">Exit preview</button></div>`;
+    banner.querySelector('#exitDeveloperPreview').addEventListener('click', async () => {
+      await fetch('/api/admin-logout', { method:'POST' }).catch(() => {});
+      location.href = '/developer#staff-preview';
+    });
+  }
+
   function show(text, ok) {
     const element = $('#adminMessage');
     element.textContent = text;
@@ -128,6 +148,7 @@
     $('#ticketList').innerHTML = '<div class="resource-section">Loading support queue…</div>';
     try {
       const response = await fetch(`/api/support/admin/tickets?${queryString()}`);
+      requireAuthentication(response);
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'The support queue could not be loaded.');
       pages = data.pages || 1;
@@ -143,11 +164,13 @@
   async function initialise() {
     try {
       const [configResponse, identityResponse] = await Promise.all([fetch('/api/support/config'), fetch('/api/support/admin/me')]);
+      requireAuthentication(identityResponse);
       const configData = await configResponse.json();
       const identityData = await identityResponse.json();
       if (!configResponse.ok || !identityResponse.ok) throw new Error(identityData.error || configData.error || 'The workspace could not be initialised.');
       configuration = configData;
       identity = identityData.identity;
+      showDeveloperPreviewBanner(identity);
       $('#accessSummary').textContent = `${identity.name} · ${identity.role === 'viewer' ? 'read-only monitoring' : 'operational case management'}${identity.confidentialAccess ? ' · restricted-case access' : ''}.`;
       $('#filterStatus').insertAdjacentHTML('beforeend', statusKeys.map(key => `<option value="${key}">${esc(statusLabels[key])}</option>`).join(''));
       $('#filterCategory').insertAdjacentHTML('beforeend', configuration.categories.map(item => `<option value="${esc(item.id)}">${esc(item.label)}</option>`).join(''));

@@ -3,10 +3,34 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Functional Units Staff Portal | Codeacademicservices</title><link rel="stylesheet" href="/styles.css"></head>
 <body class="staff-page">
   <header class="topbar"><div class="brand"><img src="/ucc-logo.png" alt="UCC logo"><div><h1>Codeacademicservices</h1><small>Functional Units Staff Portal</small></div></div><nav class="service-nav"><a href="/">Home</a><a href="/admin">Department administration</a><a href="/admin/logout">Sign out</a></nav></header>
+  <section id="developerPreviewBanner" class="developer-preview-banner" hidden aria-live="polite"></section>
   <main class="support-shell">
     <div class="page-intro"><span class="eyebrow">Protected staff workspace</span><h2 id="welcome">Loading workspace</h2><p id="accessSummary">Checking your account permissions.</p></div>
     <section id="staffMetrics" class="staff-metrics"></section>
-    <section id="leadershipDashboards"><div class="section-intro"><h2>Monitoring dashboards</h2><p>Service levels and trends for the cases your assigned role is permitted to monitor.</p></div><div id="dashboardList" class="dashboard-list"></div></section>
+    <section id="leadershipDashboards"><div class="section-intro"><h2>Monitoring dashboards</h2><p>Complaint and request statistics for every functional unit and status permitted by your role.</p></div><div id="monitoringOverview" class="monitoring-overview"></div><div id="statusStatistics" class="status-statistics"></div><div id="unitStatistics" class="unit-statistics"></div><div id="dashboardList" class="dashboard-list"></div></section>
+    <section class="report-workspace" aria-labelledby="serviceReportHeading">
+      <div class="section-intro"><h2 id="serviceReportHeading">Complaint and request reports</h2><p>Filter service activity, compare performance by study centre and functional unit, and download the complete register permitted for your role.</p></div>
+      <form id="reportFilters" class="report-filters">
+        <label>From date<input name="from" type="date"></label>
+        <label>To date<input name="to" type="date"></label>
+        <label>Study centre<select id="reportCentre" name="centre"><option value="">All permitted centres</option></select></label>
+        <label>Functional unit<select id="reportUnit" name="unit"><option value="">All permitted units</option></select></label>
+        <label>Status<select id="reportStatus" name="status"><option value="">All statuses</option></select></label>
+        <label>Category<select id="reportCategory" name="category"><option value="">All categories</option></select></label>
+        <div class="report-actions">
+          <button class="btn" type="submit">Apply report filters</button>
+          <button class="btn secondary" id="clearReportFilters" type="button">Clear filters</button>
+          <button class="btn secondary" id="downloadRegisterExcel" type="button">Download register, Excel</button>
+          <button class="btn secondary" id="downloadRegisterCsv" type="button">Download register, CSV</button>
+          <button class="btn secondary" id="downloadPerformance" type="button">Download performance report</button>
+        </div>
+      </form>
+      <div id="performanceSummary" class="performance-summary" aria-live="polite"></div>
+      <div class="performance-tables">
+        <section><h3>Performance by study centre</h3><div id="centrePerformance"></div></section>
+        <section><h3>Performance by functional unit</h3><div id="unitPerformance"></div></section>
+      </div>
+    </section>
     <section><div class="section-intro"><h2>Your functional units</h2><p>Open a specialist workspace where available. Your role controls whether actions are read-only or operational.</p></div><div id="unitCards" class="staff-unit-grid"></div></section>
     <section id="referralsSection"><div class="section-intro referral-heading"><div><h2>Shared referrals</h2><p>Accept, investigate, update, resolve, or reassign cases while preserving the permanent reference and audit trail.</p></div><label>Filter referrals<input id="referralSearch" type="search" placeholder="Reference, student, subject…"></label></div><div id="referralList" class="staff-referral-list"></div></section>
     <div id="staffMessage" class="status" role="status" aria-live="polite"></div>
