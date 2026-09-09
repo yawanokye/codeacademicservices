@@ -3,6 +3,7 @@
   const date = value => value ? new Date(value).toLocaleString('en-GB', { dateStyle:'medium', timeStyle:'short' }) : 'Not available';
   const functionalUnits = { 'student-support':'Student Support Services Unit', 'confidential-handler':'Confidential Case Handler', 'general-office':'General Office', 'student-records':'Student Records Management Unit', 'college-registrar':'College Registrar', provost:'Provost', 'directorate-education-business':'Directorate of Education and Business Studies', 'directorate-arts-stem':'Directorate of Arts and STEM Studies', 'academic-departments':'Academic Departments', examinations:'Examinations Unit', payroll:'Payroll Portal', auditor:"Auditor's Portal", 'regional-administrator':'Regional Administrators', coordinator:'Centre Coordinators', 'quality-assurance':'Quality Assurance Unit', 'college-finance':'College Finance Officer', admissions:'Admissions Unit', stores:'Stores Unit' };
   const roleLabels = { viewer:'Viewer · read-only', officer:'Officer · operational actions', administrator:'Administrator · full assigned-unit control' };
+  functionalUnits['registration-officer'] = 'Registration Officer Portal';
   let currentStaff = null;
   let referrals = [];
   let reportOptionsLoaded = false;
@@ -86,16 +87,29 @@
     const label = sla.overdue ? 'Overdue' : sla.atRisk ? 'At risk' : sla.paused ? 'SLA paused' : 'On track';
     return `<span class="sla-badge ${tone}">${label}</span>`;
   }
+  function assignmentBadge(assignment) {
+    const item = assignment || { colour:'red', label:'Not assigned to staff' };
+    return `<span class="assignment-badge assignment-${esc(item.colour || 'red')}">${esc(item.label || 'Not assigned to staff')}</span>`;
+  }
+  function assignmentHistory(ticket) {
+    if (!ticket.assignments?.length) return '<p class="admin-ticket-empty">No staff assignment has been created.</p>';
+    return `<ul class="assignment-history">${ticket.assignments.slice().reverse().map(item => `<li>${assignmentBadge(item.state)}<span><strong>${esc(item.unitLabel)}</strong> · ${esc(item.officerName || item.officerEmail)}</span><small>Assigned ${esc(date(item.assignedAt))}${item.openedAt ? ` · Opened ${esc(date(item.openedAt))}` : ''}${item.resolvedAt ? ` · Resolved ${esc(date(item.resolvedAt))}` : ''}</small></li>`).join('')}</ul>`;
+  }
   function referralCard(ticket, staff) {
-    const canEdit = staff.role !== 'viewer' && !['resolved','final-decision','closed','accepted'].includes(ticket.status);
+    const canEdit = staff.role !== 'viewer' && ticket.activeUnitIds?.length > 0 && !['resolved','final-decision','closed','accepted'].includes(ticket.status);
+    const canAssign = staff.role === 'administrator' && canEdit;
     const monitoringOnly = staff.units.length > 0 && staff.units.every(unit => ['coordinator','regional-administrator','quality-assurance'].includes(unit.id));
     const actionOptions = monitoringOnly ? '<option value="internal-note">Internal monitoring note</option>' : '<option value="accept">Accept assignment</option><option value="progress">Investigation update</option><option value="request-evidence">Request evidence from student</option><option value="resolve">Propose resolution</option><option value="final-decision">Issue final decision</option><option value="return-to-support">Return to Student Support</option><option value="internal-note">Internal note only</option>';
     const sensitive = ticket.sensitive ? '<span class="confidential-badge">Restricted</span>' : '';
-    return `<details class="admin-ticket staff-referral-card" data-id="${esc(ticket.id)}"><summary class="admin-ticket-summary"><span><span class="ticket-ref">${esc(ticket.reference)}</span><strong>${esc(ticket.subject)}</strong><small>${esc(ticket.name)} · ${esc(ticket.category)} · ${esc(ticket.ownerUnit)}</small></span><span class="ticket-summary-badges">${sensitive}${slaBadge(ticket)}<span class="ticket-priority">${esc(ticket.priority)}</span></span></summary><div class="ticket-body">
-      <div class="admin-ticket-meta"><span><strong>Status</strong>${esc(ticket.statusLabel)}</span><span><strong>Student</strong>${esc(ticket.email)}</span><span><strong>Study centre</strong>${esc(ticket.studyCentre || 'Not stated')}</span><span><strong>Assigned officer</strong>${esc(ticket.assignedCaseOwner || 'Unassigned')}</span><span><strong>Resolution target</strong>${esc(date(ticket.dueAt))}</span><span><strong>Survey</strong>${ticket.feedback?`${esc(ticket.feedback.rating)}/5 overall`:'Not submitted'}</span><span><strong>Assistance language</strong>${esc(({en:'English',tw:'Twi',fr:'French'})[ticket.language]||'English')}</span><span><strong>Notifications</strong>${esc(({'email':'Email only','email-sms':'Email and SMS','email-whatsapp':'Email and WhatsApp'})[ticket.notificationPreference]||'Email only')}</span></div>
+    const activeUnits = staff.units.filter(unit => ticket.activeUnitIds?.includes(unit.id));
+    const preferredUnit = activeUnits.some(unit => unit.id === ticket.assignment?.unitId) ? ticket.assignment.unitId : (activeUnits[0]?.id || '');
+    const assignmentUnits = activeUnits.map(unit => `<option value="${esc(unit.id)}" ${unit.id === preferredUnit ? 'selected' : ''}>${esc(unit.label)}</option>`).join('');
+    return `<details class="admin-ticket staff-referral-card" data-id="${esc(ticket.id)}"><summary class="admin-ticket-summary"><span><span class="ticket-ref">${esc(ticket.reference)}</span><strong>${esc(ticket.subject)}</strong><small>${esc(ticket.name)} · ${esc(ticket.category)} · ${esc(ticket.ownerUnit)}</small></span><span class="ticket-summary-badges">${assignmentBadge(ticket.assignment)}${sensitive}${slaBadge(ticket)}<span class="ticket-priority">${esc(ticket.priority)}</span></span></summary><div class="ticket-body">
+      <div class="admin-ticket-meta"><span><strong>Status</strong>${esc(ticket.statusLabel)}</span><span><strong>Student</strong>${esc(ticket.email)}</span><span><strong>Study centre</strong>${esc(ticket.studyCentre || 'Not stated')}</span><span><strong>Staff assignment</strong>${assignmentBadge(ticket.assignment)}</span><span><strong>Assigned officer</strong>${esc(ticket.assignment?.officerName || ticket.assignedCaseOwner || 'Unassigned')}</span><span><strong>Resolution target</strong>${esc(date(ticket.dueAt))}</span><span><strong>Survey</strong>${ticket.feedback?`${esc(ticket.feedback.rating)}/5 overall`:'Not submitted'}</span><span><strong>Assistance language</strong>${esc(({en:'English',tw:'Twi',fr:'French'})[ticket.language]||'English')}</span><span><strong>Notifications</strong>${esc(({'email':'Email only','email-sms':'Email and SMS','email-whatsapp':'Email and WhatsApp'})[ticket.notificationPreference]||'Email only')}</span></div>
       <p class="admin-ticket-description">${esc(ticket.description)}</p>
+      <section class="staff-assignment-panel"><div><h4>Staff email assignment</h4><p>Red means not opened. Yellow means the staff member opened the secure link. Green means all resolution checks were completed.</p></div>${canAssign ? `<form class="staff-assignment-form"><label>Functional unit<select name="unitId" required>${assignmentUnits}</select></label><label>Staff name<input name="officerName" placeholder="Staff member's name"></label><label>Institutional email<input name="officerEmail" type="email" placeholder="name@ucc.edu.gh" required></label><button class="btn" type="submit">Assign and send link</button></form><div class="assignment-result" aria-live="polite"></div>` : '<p class="staff-restricted">Only an administrator for the functional unit may assign a staff member.</p>'}${assignmentHistory(ticket)}</section>
       <div class="ticket-two-column"><section class="evidence-panel"><h4>Student evidence</h4>${evidence(ticket, ticket.evidence, 'evidence')}</section><section class="evidence-panel"><h4>Officer evidence</h4>${evidence(ticket, ticket.officerEvidence, 'officer-evidence')}${canEdit ? `<form class="officer-evidence-form" enctype="multipart/form-data"><label>Files<input name="evidenceFiles" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.webp,.txt"></label><label>Evidence note<input name="note" placeholder="Source and relevance"></label><button class="btn secondary" type="submit">Attach</button></form>` : ''}</section></div>
-      ${canEdit ? `<section class="case-update-panel"><h4>${monitoringOnly ? 'Monitoring note' : 'Receiving-unit action'}</h4><p>${monitoringOnly ? 'This role may attach centre evidence, add internal monitoring notes, and escalate through reassignment; it cannot issue operational decisions.' : 'Accept the assignment, record progress, request student evidence, issue a resolution, or return the case to Student Support.'}</p><div class="case-controls"><label>Action<select class="staff-action">${actionOptions}</select></label><label>Assigned officer<input class="staff-assignee" value="${esc(ticket.assignedCaseOwner || staff.name)}"></label><label class="wide">Case note<textarea class="staff-note" placeholder="Required. Explain the action, evidence needed, progress, or decision."></textarea></label><button class="btn staff-update" type="button">Record action</button></div></section>` : `<p class="staff-restricted">${staff.role === 'viewer' ? 'Your viewer role is read-only.' : 'This referral has reached a decision or closed state.'}</p>`}
+      ${canEdit ? `<section class="case-update-panel"><h4>${monitoringOnly ? 'Monitoring note' : 'Receiving-unit action'}</h4><p>${monitoringOnly ? 'This role may attach centre evidence, add internal monitoring notes, and escalate through reassignment; it cannot issue operational decisions.' : 'Accept the assignment, record progress, request student evidence, issue a resolution, or return the case to Student Support.'}</p><div class="case-controls"><label>Action<select class="staff-action">${actionOptions}</select></label><label class="wide">Case note<textarea class="staff-note" placeholder="Required. Explain the action, evidence needed, progress, or decision."></textarea></label><button class="btn staff-update" type="button">Record action</button></div></section>` : `<p class="staff-restricted">${staff.role === 'viewer' ? 'Your viewer role is read-only.' : 'This referral is historical or has reached a decision or closed state.'}</p>`}
       <div class="ticket-two-column"><section class="evidence-panel"><h4>Student-facing progress</h4>${studentUpdates(ticket)}</section><section class="evidence-panel"><h4>Referral and reassignment history</h4>${history(ticket)}</section></div>
       ${canEdit ? `<section class="forward-panel"><h4>Reassign this case</h4><p>The receiving unit gets the same reference, evidence, and history.</p><div class="forward-fields"><label>Receiving unit<select class="staff-reassign-unit">${unitOptions()}</select></label><label class="forward-comment">Reason<textarea class="staff-reassign-note"></textarea></label><button class="btn secondary staff-reassign" type="button">Reassign case</button></div></section>` : ''}
     </div></details>`;
@@ -108,6 +122,7 @@
     list.querySelectorAll('.staff-update').forEach(button => button.addEventListener('click', updateCase));
     list.querySelectorAll('.staff-reassign').forEach(button => button.addEventListener('click', reassign));
     list.querySelectorAll('.officer-evidence-form').forEach(form => form.addEventListener('submit', uploadEvidence));
+    list.querySelectorAll('.staff-assignment-form').forEach(form => form.addEventListener('submit', assignStaff));
   }
   function reportQueryString() {
     const parameters = new URLSearchParams();
@@ -169,7 +184,7 @@
   }
   async function updateCase(event) {
     const article = event.currentTarget.closest('.staff-referral-card');
-    const body = { action:article.querySelector('.staff-action').value, assignedCaseOwner:article.querySelector('.staff-assignee').value, note:article.querySelector('.staff-note').value };
+    const body = { action:article.querySelector('.staff-action').value, note:article.querySelector('.staff-note').value };
     event.currentTarget.disabled = true;
     try {
       const response = await fetch(`/api/staff/referrals/${encodeURIComponent(article.dataset.id)}`, { method:'PATCH', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) });
@@ -191,6 +206,22 @@
       show('Officer evidence attached.', true);
       await load();
     } catch (error) { show(error.message, false); button.disabled = false; }
+  }
+  async function assignStaff(event) {
+    event.preventDefault();
+    const article = event.currentTarget.closest('.staff-referral-card');
+    const button = event.currentTarget.querySelector('button');
+    const result = article.querySelector('.assignment-result');
+    button.disabled = true;
+    try {
+      const body = Object.fromEntries(new FormData(event.currentTarget));
+      const response = await fetch(`/api/staff/referrals/${encodeURIComponent(article.dataset.id)}/staff-assignments`, { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'The staff assignment could not be created.');
+      result.innerHTML = `<p class="assignment-link-result">${esc(data.message)} <a href="${esc(data.secureUrl)}" target="_blank" rel="noopener">Open or copy secure link</a></p>`;
+      show(`Assigned ${data.reference} to ${body.officerEmail}.`, true);
+      button.disabled = false;
+    } catch (error) { result.textContent = error.message; show(error.message, false); button.disabled = false; }
   }
   async function reassign(event) {
     const article = event.currentTarget.closest('.staff-referral-card');

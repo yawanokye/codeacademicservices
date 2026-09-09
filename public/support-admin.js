@@ -50,6 +50,14 @@
     const label = sla.overdue ? 'Overdue' : sla.atRisk ? 'At risk' : sla.paused ? 'SLA paused' : 'On track';
     return `<span class="sla-badge ${tone}">${label}</span>`;
   }
+  function assignmentBadge(assignment) {
+    const item = assignment || { colour:'red', label:'Not assigned to staff' };
+    return `<span class="assignment-badge assignment-${esc(item.colour || 'red')}">${esc(item.label || 'Not assigned to staff')}</span>`;
+  }
+  function assignmentHistory(ticket) {
+    if (!ticket.assignments?.length) return '<p class="admin-ticket-empty">No staff assignment has been created.</p>';
+    return `<ul class="assignment-history">${ticket.assignments.slice().reverse().map(item => `<li>${assignmentBadge(item.state)}<span><strong>${esc(item.unitLabel)}</strong> · ${esc(item.officerName || item.officerEmail)}</span><small>Assigned ${esc(date(item.assignedAt))}${item.openedAt ? ` · Opened ${esc(date(item.openedAt))}` : ''}${item.resolvedAt ? ` · Resolved ${esc(date(item.resolvedAt))}` : ''}</small></li>`).join('')}</ul>`;
+  }
   function evidence(ticket, files, collection) {
     if (!files?.length) return '<p class="admin-ticket-empty">No files attached.</p>';
     return `<div class="evidence-list">${files.map((file, index) => {
@@ -68,18 +76,22 @@
   }
   function ticketCard(ticket) {
     const canEdit = identity.role !== 'viewer';
+    const canAssign = identity.role === 'administrator';
     const categories = selectOptions(configuration.categories, ticket.categoryKey, 'Keep current category');
-    const units = selectOptions(configuration.units, ticket.ownerUnitId, 'Keep current unit');
     const routingUnits = selectOptions(configuration.units, '', 'Select functional unit');
+    const assignableUnits = configuration.units.filter(item => (identity.units || []).includes(item.id));
+    const preferredAssignmentUnit = assignableUnits.some(item => item.id === ticket.ownerUnitId) ? ticket.ownerUnitId : (assignableUnits[0]?.id || '');
+    const assignmentUnits = selectOptions(assignableUnits, preferredAssignmentUnit, 'Select your functional unit');
     const statuses = statusKeys.map(key => `<option value="${key}" ${key === ticket.status ? 'selected' : ''}>${esc(statusLabels[key])}</option>`).join('');
     return `<details class="admin-ticket" data-id="${esc(ticket.id)}">
-      <summary class="admin-ticket-summary"><span><span class="ticket-ref">${esc(ticket.reference)}</span><strong>${esc(ticket.subject)}</strong><small>${esc(ticket.name)} · ${esc(ticket.category)} · ${esc(ticket.ownerUnit)}</small></span><span class="ticket-summary-badges">${ticket.sensitive ? '<span class="confidential-badge">Restricted</span>' : ''}${slaBadge(ticket)}<span class="ticket-priority">${esc(ticket.priority)}</span></span></summary>
+      <summary class="admin-ticket-summary"><span><span class="ticket-ref">${esc(ticket.reference)}</span><strong>${esc(ticket.subject)}</strong><small>${esc(ticket.name)} · ${esc(ticket.category)} · ${esc(ticket.ownerUnit)}</small></span><span class="ticket-summary-badges">${assignmentBadge(ticket.assignment)}${ticket.sensitive ? '<span class="confidential-badge">Restricted</span>' : ''}${slaBadge(ticket)}<span class="ticket-priority">${esc(ticket.priority)}</span></span></summary>
       <div class="ticket-body">
-        <div class="admin-ticket-meta"><span><strong>Status</strong>${esc(ticket.statusLabel)}</span><span><strong>Student</strong>${esc(ticket.email)}</span><span><strong>Study centre</strong>${esc(ticket.studyCentre || 'Not stated')}</span><span><strong>Programme</strong>${esc(ticket.programme || 'Not stated')}</span><span><strong>Resolution target</strong>${esc(date(ticket.dueAt))}</span><span><strong>Assigned officer</strong>${esc(ticket.assignedCaseOwner || 'Unassigned')}</span><span><strong>Student feedback</strong>${ticket.feedback ? `${esc(ticket.feedback.rating)}/5 · ${esc(ticket.feedback.resolved)}` : 'Not submitted'}</span><span><strong>Assistance language</strong>${esc(({en:'English',tw:'Twi',fr:'French'})[ticket.language] || ticket.language || 'English')}</span><span><strong>Notifications</strong>${esc(ticket.notificationPreference || 'email')}</span></div>
+        <div class="admin-ticket-meta"><span><strong>Status</strong>${esc(ticket.statusLabel)}</span><span><strong>Student</strong>${esc(ticket.email)}</span><span><strong>Study centre</strong>${esc(ticket.studyCentre || 'Not stated')}</span><span><strong>Programme</strong>${esc(ticket.programme || 'Not stated')}</span><span><strong>Resolution target</strong>${esc(date(ticket.dueAt))}</span><span><strong>Staff assignment</strong>${assignmentBadge(ticket.assignment)}</span><span><strong>Assigned officer</strong>${esc(ticket.assignment?.officerName || ticket.assignedCaseOwner || 'Unassigned')}</span><span><strong>Student feedback</strong>${ticket.feedback ? `${esc(ticket.feedback.rating)}/5 · ${esc(ticket.feedback.resolved)}` : 'Not submitted'}</span><span><strong>Assistance language</strong>${esc(({en:'English',tw:'Twi',fr:'French'})[ticket.language] || ticket.language || 'English')}</span><span><strong>Notifications</strong>${esc(ticket.notificationPreference || 'email')}</span></div>
         <p class="admin-ticket-description">${esc(ticket.description)}</p>
+        <section class="staff-assignment-panel"><div><h4>Staff email assignment</h4><p>Red means not opened. Yellow means the staff member opened the secure link. Green means all resolution checks were completed.</p></div>${canAssign ? `<form class="staff-assignment-form"><label>Functional unit<select name="unitId" required>${assignmentUnits}</select></label><label>Staff name<input name="officerName" placeholder="Staff member's name"></label><label>Institutional email<input name="officerEmail" type="email" placeholder="name@ucc.edu.gh" required></label><button class="btn" type="submit">Assign and send link</button></form><div class="assignment-result" aria-live="polite"></div>` : '<p class="staff-restricted">Only an administrator for the functional unit may assign a staff member.</p>'}${assignmentHistory(ticket)}</section>
         ${ticket.feedback ? `<section class="feedback-detail"><h4>Student satisfaction survey</h4><div class="feedback-score-grid"><span><strong>${esc(ticket.feedback.rating)}/5</strong>Overall</span><span><strong>${esc(ticket.feedback.easeOfUse ?? '—')}/5</strong>Ease</span><span><strong>${esc(ticket.feedback.communication ?? '—')}/5</strong>Communication</span><span><strong>${esc(ticket.feedback.timeliness ?? '—')}/5</strong>Timeliness</span><span><strong>${esc(ticket.feedback.staffCourtesy ?? '—')}/5</strong>Courtesy</span></div><p><strong>Resolved:</strong> ${esc(ticket.feedback.resolved)} · <strong>Notifications helpful:</strong> ${esc(ticket.feedback.notificationHelpful || 'not recorded')} · <strong>Language assistance:</strong> ${esc(ticket.feedback.languageHelp || 'not recorded')}</p><p>${esc(ticket.feedback.comment || 'No additional comment.')}</p><small>${esc(date(ticket.feedback.submittedAt))}</small></section>` : ''}
         <div class="ticket-two-column"><section class="evidence-panel"><h4>Student evidence</h4>${evidence(ticket, ticket.evidence, 'evidence')}</section><section class="evidence-panel"><h4>Officer evidence</h4>${evidence(ticket, ticket.officerEvidence, 'officer-evidence')}${canEdit ? `<form class="officer-evidence-form" enctype="multipart/form-data"><label>Files<input name="evidenceFiles" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.webp,.txt"></label><label>Evidence note<input name="note" placeholder="Source and relevance"></label><button class="btn secondary" type="submit">Attach</button></form>` : ''}</section></div>
-        ${canEdit ? `<section class="case-update-panel"><h4>Classify, assign and update</h4><p>Every operational update is recorded in the audit trail. Student-facing notes appear in tracking and email when delivery is configured.</p><div class="case-controls"><label>Category<select class="ticket-category">${categories}</select></label><label>Priority<select class="ticket-priority-key"><option value="low" ${ticket.priorityKey === 'low' ? 'selected' : ''}>Low</option><option value="normal" ${ticket.priorityKey === 'normal' ? 'selected' : ''}>Normal</option><option value="high" ${ticket.priorityKey === 'high' ? 'selected' : ''}>High</option><option value="urgent" ${ticket.priorityKey === 'urgent' ? 'selected' : ''}>Urgent</option></select></label><label>Responsible unit<select class="ticket-owner-unit">${units}</select></label><label>Assigned officer<input class="ticket-assignee" value="${esc(ticket.assignedCaseOwner)}" placeholder="Officer name"></label><label>Case status<select class="ticket-status">${statuses}</select></label><label>Response template<select class="update-template"><option value="">Write a custom update</option><option value="evidence">Request missing evidence</option><option value="investigation">Investigation underway</option><option value="delay">Delay and escalation notice</option><option value="resolution">Resolution ready</option></select></label><label class="wide">Student-facing update<textarea class="ticket-note" placeholder="Required for evidence requests, investigation updates and decisions"></textarea></label><button class="btn save-ticket" type="button">Save and notify</button></div></section>` : '<p class="staff-restricted">Your viewer role is read-only.</p>'}
+        ${canEdit ? `<section class="case-update-panel"><h4>Classify and update</h4><p>Use the staff email assignment panel above to assign an officer, and use Reassign below to change the responsible unit without losing history.</p><div class="case-controls"><label>Category<select class="ticket-category">${categories}</select></label><label>Priority<select class="ticket-priority-key"><option value="low" ${ticket.priorityKey === 'low' ? 'selected' : ''}>Low</option><option value="normal" ${ticket.priorityKey === 'normal' ? 'selected' : ''}>Normal</option><option value="high" ${ticket.priorityKey === 'high' ? 'selected' : ''}>High</option><option value="urgent" ${ticket.priorityKey === 'urgent' ? 'selected' : ''}>Urgent</option></select></label><label>Case status<select class="ticket-status">${statuses}</select></label><label>Response template<select class="update-template"><option value="">Write a custom update</option><option value="evidence">Request missing evidence</option><option value="investigation">Investigation underway</option><option value="delay">Delay and escalation notice</option><option value="resolution">Resolution ready</option></select></label><label class="wide">Student-facing update<textarea class="ticket-note" placeholder="Required for evidence requests, investigation updates and decisions"></textarea></label><button class="btn save-ticket" type="button">Save and notify</button></div></section>` : '<p class="staff-restricted">Your viewer role is read-only.</p>'}
         <div class="ticket-two-column"><section class="evidence-panel"><h4>Student-facing progress</h4>${history(ticket.studentUpdates, 'No student-facing updates yet.', false)}</section><section class="evidence-panel"><h4>Audit trail</h4>${history(ticket.auditTrail, 'No audit entries yet.', true)}</section></div>
         ${canEdit ? `<section class="routing-grid"><div class="forward-panel"><h4>Request information</h4><p>Uses the selected unit's active institutional officer accounts.</p><label>Functional unit<select class="message-unit">${routingUnits}</select></label><label>Information required<textarea class="message-text"></textarea></label><button class="btn secondary message-unit-button" type="button">Send request</button></div><div class="forward-panel"><h4>Register and forward</h4><p>Creates the receiving unit's shared case record even when email is unavailable.</p><label>Receiving unit<select class="forward-unit">${routingUnits}</select></label><label>Routing instructions<textarea class="forward-note"></textarea></label><button class="btn forward-ticket" type="button">Forward case</button></div><div class="forward-panel"><h4>Reassign case</h4><p>Preserves the permanent reference and the full handover history.</p><label>Next unit<select class="reassign-unit">${routingUnits}</select></label><label>Reason for reassignment<textarea class="reassign-note"></textarea></label><button class="btn secondary reassign-ticket" type="button">Reassign</button></div></section>` : ''}
         <section class="evidence-panel"><h4>Referral history</h4>${referralHistory(ticket)}</section>
@@ -92,6 +104,7 @@
     document.querySelectorAll('.message-unit-button').forEach(button => button.addEventListener('click', sendUnitMessage));
     document.querySelectorAll('.forward-ticket').forEach(button => button.addEventListener('click', forwardTicket));
     document.querySelectorAll('.reassign-ticket').forEach(button => button.addEventListener('click', reassignTicket));
+    document.querySelectorAll('.staff-assignment-form').forEach(form => form.addEventListener('submit', assignStaff));
     document.querySelectorAll('.update-template').forEach(select => select.addEventListener('change', applyUpdateTemplate));
   }
   function applyUpdateTemplate(event) {
@@ -111,7 +124,7 @@
   async function saveTicket(event) {
     const article = event.currentTarget.closest('.admin-ticket');
     event.currentTarget.disabled = true;
-    const body = { categoryKey:article.querySelector('.ticket-category').value, priorityKey:article.querySelector('.ticket-priority-key').value, ownerUnitId:article.querySelector('.ticket-owner-unit').value, assignedCaseOwner:article.querySelector('.ticket-assignee').value, status:article.querySelector('.ticket-status').value, note:article.querySelector('.ticket-note').value };
+    const body = { categoryKey:article.querySelector('.ticket-category').value, priorityKey:article.querySelector('.ticket-priority-key').value, status:article.querySelector('.ticket-status').value, note:article.querySelector('.ticket-note').value };
     try { await request(article, '', { method:'PATCH', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) }, data => `Updated ${data.ticket.reference}.`); } catch (error) { show(error.message, false); event.currentTarget.disabled = false; }
   }
   async function uploadEvidence(event) {
@@ -120,6 +133,22 @@
     const button = event.currentTarget.querySelector('button');
     button.disabled = true;
     try { await request(article, '/officer-evidence', { method:'POST', body:new FormData(event.currentTarget) }, () => 'Officer evidence attached.'); } catch (error) { show(error.message, false); button.disabled = false; }
+  }
+  async function assignStaff(event) {
+    event.preventDefault();
+    const article = event.currentTarget.closest('.admin-ticket');
+    const button = event.currentTarget.querySelector('button');
+    const result = article.querySelector('.assignment-result');
+    button.disabled = true;
+    try {
+      const body = Object.fromEntries(new FormData(event.currentTarget));
+      const response = await fetch(`/api/support/admin/tickets/${encodeURIComponent(article.dataset.id)}/staff-assignments`, { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'The staff assignment could not be created.');
+      result.innerHTML = `<p class="assignment-link-result">${esc(data.message)} <a href="${esc(data.secureUrl)}" target="_blank" rel="noopener">Open or copy secure link</a></p>`;
+      show(`Assigned ${data.reference} to ${body.officerEmail}.`, true);
+      button.disabled = false;
+    } catch (error) { result.textContent = error.message; show(error.message, false); button.disabled = false; }
   }
   async function sendUnitMessage(event) {
     const article = event.currentTarget.closest('.admin-ticket');

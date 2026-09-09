@@ -23,6 +23,10 @@
     certificate: 'Helpful evidence: completion details, graduation year and earlier certificate correspondence.',
     'change-of-name': 'Helpful evidence: approved identity documents and the formal name-change record.',
     transcript: 'Helpful evidence: application receipt, payment reference, date and intended destination.',
+    deferment: 'Helpful evidence: student number, programme, requested deferment period, reason and supporting documents.',
+    'resumption-deferment': 'Helpful evidence: approved deferment letter or reference, deferred period and proposed resumption semester.',
+    'resumption-rustication': 'Helpful evidence: rustication decision, end date, proof that stated conditions were completed and proposed resumption semester.',
+    'registration-challenge': 'Helpful evidence: course codes, academic year, semester, screenshots, exact error message and any payment or clearance evidence.',
     'change-study-centre': 'Helpful evidence: current centre, proposed centre and reason for the request.',
     'centre-transit': 'Helpful evidence: current centre, temporary centre, dates and coordinator confirmation.',
     'programme-department': 'Helpful evidence: programme, course or departmental correspondence.',
@@ -175,7 +179,7 @@
     const assistance={tw:{title:'Twi mmoa',text:'Kyerɛ asɛm no mu pefee, fa nna ne reference ka ho. Sɛ wohia mmoa a, study centre coordinator betumi aboa wo.'},fr:{title:'Aide en français',text:'Décrivez clairement la situation avec les dates et références. Un coordonnateur de centre peut vous aider si nécessaire.'}};
     if (expectation) expectation.innerHTML = information ? `<strong>Before submitting</strong><span>${esc(information.beforeSubmitting)}</span><small>Expected owner: ${esc(information.responsibleUnit)} · Standard target: ${esc(information.workingDays)} working day${Number(information.workingDays) === 1 ? '' : 's'}.</small>${assistance[language]?`<div class="translated-assistance"><strong>${esc(assistance[language].title)}</strong><span>${esc(assistance[language].text)}</span></div>`:''}` : '';
     const academic = document.getElementById('academicFields');
-    if (academic) academic.hidden = !['programme-department','assessment-project','incomplete-result'].includes(category);
+    if (academic) academic.hidden = !['programme-department','assessment-project','incomplete-result','deferment','resumption-deferment','resumption-rustication','registration-challenge'].includes(category);
   }
   function applyRequestedDefaults() {
     const type=document.getElementById('type');
