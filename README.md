@@ -345,3 +345,26 @@ No new Render environment variable or npm dependency is required for v30.
 - Added an automated HTML-to-JavaScript DOM contract check to prevent another portal release with missing required page controls.
 
 No new environment variable or npm dependency is required for this update.
+
+## v37: Dual registration and staff assignment lifecycle
+
+- A student complaint or service request is now registered automatically with both Student Support Services and the responsible functional unit selected from the service category. Both units work from the same permanent reference, evidence, history, and status record.
+- Student Support and receiving functional units may reassign the same case to another functional unit. Each receiving unit is added to the registration history, while Student Support retains oversight.
+- Each functional-unit administrator can assign a registered case to a staff member using an approved institutional email address. The staff member receives a personal secure link when email delivery is configured. The link is also returned to the administrator for copying when delivery is unavailable.
+- Staff assignment indicators are red until the assigned staff member opens the secure link, yellow after opening, and green after the staff member checks all required resolution confirmations and records the resolution.
+- The colour and assignment timestamps appear consistently in Student Support, Functional Units, CSV registers, and Excel registers.
+- Reassignment supersedes any unfinished assignment in the sending unit, clears the assignee, and starts the receiving unit at red without changing the permanent case reference.
+
+No new npm dependency is required. Existing Gmail settings are used for staff assignment emails. `SUPPORT_ALLOWED_EMAIL_DOMAINS` continues to control approved staff email domains.
+
+## v38: Deferment, resumption and registration requests
+
+- Added Request for Deferment.
+- Added Request for Resumption from Deferment.
+- Added Request for Resumption from Rustication.
+- The three academic-status requests route directly to the Student Support Services Unit.
+- Added Registration Challenge, which routes directly to the new Registration Officer Portal while remaining registered with Student Support Services for monitoring.
+- Added Registration Officer Portal access to developer previews, staff-account permissions, shared referrals, reassignment, staff email assignment and downloadable registers.
+- Added guidance and knowledge-base entries for the four services, including the information and evidence students should prepare.
+
+No new environment variable or npm dependency is required.

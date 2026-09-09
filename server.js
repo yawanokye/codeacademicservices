@@ -218,6 +218,7 @@ const STAFF_UNITS = Object.freeze({
   'confidential-handler': { label: 'Confidential Case Handler', summary: 'Restricted handling of sensitive complaints, protected evidence and authorised escalations.' },
   'general-office': { label: 'General Office', summary: 'Receive transcript requests and general administrative service matters.' },
   'student-records': { label: 'Student Records Management Unit', summary: 'Receive and process assigned records matters. Official records remain controlled through approved UCC systems.' },
+  'registration-officer': { label: 'Registration Officer Portal', summary: 'Receive and resolve student course-registration challenges while preserving approved academic records.' },
   'college-registrar': { label: 'College Registrar', summary: 'Handle registrar matters, certificates, name changes and escalated service requests.' },
   'provost': { label: 'Provost', summary: 'Read-only oversight of service performance, sensitive escalation and institutional trends.' },
   'directorate-education-business': { label: 'Directorate of Education and Business Studies', summary: 'Academic oversight for Education and Business programmes.' },
@@ -1840,6 +1841,10 @@ const SUPPORT_CATEGORIES = Object.freeze({
   'certificate': { label: 'Certificate issue', owner: 'College Registrar', support: 'Student Records Management Unit', suggestedUnit: 'college-registrar', days: 10 },
   'change-of-name': { label: 'Change of name', owner: 'College Registrar', support: 'Student Records Management Unit', suggestedUnit: 'college-registrar', days: 10 },
   'transcript': { label: 'Transcript request', owner: 'General Office', support: 'College Registrar / Student Records Management Unit', suggestedUnit: 'general-office', days: 10 },
+  'deferment': { label: 'Request for deferment', owner: 'Student Support Services Unit', support: 'Student Support Services Unit', suggestedUnit: 'student-support', days: 10 },
+  'resumption-deferment': { label: 'Request for resumption from deferment', owner: 'Student Support Services Unit', support: 'Student Support Services Unit', suggestedUnit: 'student-support', days: 10 },
+  'resumption-rustication': { label: 'Request for resumption from rustication', owner: 'Student Support Services Unit', support: 'Student Support Services Unit', suggestedUnit: 'student-support', days: 10 },
+  'registration-challenge': { label: 'Registration challenges', owner: 'Registration Officer Portal', support: 'Student Records Management Unit / College Registrar', suggestedUnit: 'registration-officer', days: 5 },
   'change-study-centre': { label: 'Change of study centre', owner: 'Student Support Services Unit', support: 'Student Support Services Unit', suggestedUnit: 'student-support', days: 10 },
   'centre-transit': { label: 'Transit between centres', owner: 'Student Support Services Unit', support: 'Student Support Services Unit', suggestedUnit: 'student-support', days: 10 },
   'programme-department': { label: 'Programme or departmental issue', owner: 'Academic Departments', support: 'Director / College Registrar', suggestedUnit: 'academic-departments', days: 10 },
@@ -1853,6 +1858,10 @@ const SUPPORT_CATEGORY_GUIDANCE = Object.freeze({
   certificate: { evidence: 'Completion details, graduation year and earlier certificate correspondence.', before: 'Confirm the programme name, completion year and collection or delivery method.' },
   'change-of-name': { evidence: 'Approved identity documents and the formal name-change record.', before: 'Use the exact current and requested names and prepare the authorised supporting record.' },
   transcript: { evidence: 'Application receipt, payment reference, application date and intended destination.', before: 'Confirm the destination address and whether the request is electronic or physical.' },
+  deferment: { evidence: 'Student number, programme, requested deferment period, reason and relevant supporting documents.', before: 'State the academic year and semester from which the deferment should take effect.' },
+  'resumption-deferment': { evidence: 'Approved deferment letter or reference, programme, deferred period and proposed resumption semester.', before: 'Confirm that the approved deferment period has ended and state the academic period for resumption.' },
+  'resumption-rustication': { evidence: 'Rustication decision or reference, stated end date, evidence of compliance and proposed resumption semester.', before: 'Confirm that the rustication period and any stated conditions have been completed.' },
+  'registration-challenge': { evidence: 'Course codes, academic year, semester, registration screenshots, error message and any payment or clearance evidence.', before: 'List every affected course code and copy the exact message shown during registration.' },
   'change-study-centre': { evidence: 'Current centre, proposed centre and reason for the request.', before: 'Confirm both centre names and the semester from which the change should apply.' },
   'centre-transit': { evidence: 'Current centre, temporary centre, dates and coordinator confirmation.', before: 'Confirm the start and end dates of the temporary transit.' },
   'programme-department': { evidence: 'Programme, course details and relevant departmental correspondence.', before: 'Identify the programme, department and specific academic action required.' },
@@ -1967,8 +1976,40 @@ function supportStatusIdentity(token) {
     return parsed?.reference && parsed?.email ? parsed : null;
   } catch { return null; }
 }
+const SUPPORT_ASSIGNMENT_CHECKS = Object.freeze([
+  { id:'reviewed', label:'I have reviewed the complaint or request and all available evidence.' },
+  { id:'actionCompleted', label:'I have completed the action required from my functional unit.' },
+  { id:'resolutionRecorded', label:'I have recorded a clear resolution for the student and oversight units.' }
+]);
+function supportAssignmentState(assignment) {
+  if (!assignment) return { key:'unassigned', label:'Not assigned to staff', colour:'red' };
+  if (assignment.state === 'resolved') return { key:'resolved', label:'Resolved by assigned staff', colour:'green' };
+  if (assignment.state === 'opened') return { key:'opened', label:'Opened by assigned staff', colour:'yellow' };
+  return { key:'unopened', label:'Assigned, not yet opened', colour:'red' };
+}
+function supportAssignmentSummary(ticket, unitIds = []) {
+  const allowed = new Set(normalizeStaffUnits(unitIds));
+  const assignments = (Array.isArray(ticket?.staffAssignments) ? ticket.staffAssignments : [])
+    .filter(item => item.state !== 'superseded' && (!allowed.size || allowed.has(item.unitId)))
+    .sort((a,b) => String(b.assignedAt || '').localeCompare(String(a.assignedAt || '')));
+  const assignment = assignments[0] || null;
+  const state = supportAssignmentState(assignment);
+  return { ...state, id:assignment?.id || '', unitId:assignment?.unitId || '', unitLabel:assignment?.unitLabel || '', officerName:assignment?.officerName || '', officerEmail:assignment?.officerEmail || '', assignedAt:assignment?.assignedAt || null, openedAt:assignment?.openedAt || null, resolvedAt:assignment?.resolvedAt || null, emailStatus:assignment?.emailStatus || '', resolutionNote:assignment?.resolutionNote || '' };
+}
+function supportAssignmentList(ticket) {
+  return (Array.isArray(ticket?.staffAssignments)?ticket.staffAssignments:[]).filter(item=>item.state!=='superseded').map(item=>({id:item.id,unitId:item.unitId,unitLabel:item.unitLabel,officerName:item.officerName,officerEmail:item.officerEmail,assignedBy:item.assignedBy,assignedAt:item.assignedAt,expiresAt:item.expiresAt,state:supportAssignmentState(item),openedAt:item.openedAt||null,resolvedAt:item.resolvedAt||null,emailStatus:item.emailStatus||'',resolutionNote:item.resolutionNote||''}));
+}
+function supportAssignmentForToken(tickets, token) {
+  const tokenHash = hashOneTimeToken(token);
+  for (const ticket of tickets) {
+    const assignment = (ticket.staffAssignments || []).find(item => item.tokenHash === tokenHash);
+    if (assignment) return { ticket, assignment };
+  }
+  return null;
+}
 function supportPublicTicket(ticket) {
   const responseDeadline = ticket.studentResponseDueAt ? new Date(ticket.studentResponseDueAt).getTime() : 0;
+  const staffAssignment=supportAssignmentSummary(ticket,[ticket.ownerUnitId]);
   return {
     reference: ticket.reference,
     type: ticket.type,
@@ -1994,6 +2035,7 @@ function supportPublicTicket(ticket) {
     feedbackSubmitted: Boolean(ticket.feedback),
     language: ticket.language || 'en',
     notificationPreference: ticket.notificationPreference || 'email',
+    staffAssignment:{key:staffAssignment.key,label:staffAssignment.label,colour:staffAssignment.colour,unitLabel:staffAssignment.unitLabel,openedAt:staffAssignment.openedAt,resolvedAt:staffAssignment.resolvedAt},
     sla: supportSlaSummary(ticket),
     updates: (ticket.studentUpdates || []).slice(-12)
   };
@@ -2112,6 +2154,22 @@ async function sendSupportStudentUpdateEmail(ticket, update, req) {
   const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">${heading}</h2><p>Dear ${htmlEscape(ticket.name || 'Student')},</p><p>Student Support Services has updated your ${ticket.type === 'service-request' ? 'service request' : 'complaint'}.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #d4a72c"><strong>Reference:</strong> ${htmlEscape(ticket.reference)}<br><strong>Current stage:</strong> ${htmlEscape(SUPPORT_STATUS_LABELS[ticket.status] || ticket.status)}<br><strong>Responsible unit:</strong> ${htmlEscape(ticket.ownerUnit)}</div><p><strong>Update</strong><br>${htmlEscape(update.message || update.label || 'Your case has been updated.').replace(/\n/g,'<br>')}</p><p><a href="${htmlEscape(statusUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Track your case or respond</a></p><p>${final?'This is the final decision recorded for this case. You may use the tracking page if you need to review the decision or submit an authorised reopening request.':'Please use the tracking page to review the update. If more evidence is requested, upload it there.'}</p><p>Regards,<br>Student Support Services<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
   await dispatchSupportStudentNotification(ticket, { kind:'update', subject, html, req });
 }
+async function sendSupportRegistrationEmails(ticket, req) {
+  if (!gmailConfigured()) return;
+  const unitIds = ticket.sensitive
+    ? [ticket.ownerUnitId]
+    : [...new Set(['student-support', ticket.ownerUnitId].filter(unit => STAFF_UNITS[unit]))];
+  for (const unitId of unitIds) {
+    const recipients = (await supportUnitNotificationRecipients(unitId)).filter(email => supportEmailsAreInstitutional([email]));
+    if (!recipients.length) continue;
+    const unitLabel = STAFF_UNITS[unitId].label;
+    const portalPath = unitId === 'student-support' ? '/support-admin' : '/staff';
+    const portalUrl = `${baseUrlFor(req)}${portalPath}`;
+    const roleText = unitId === ticket.ownerUnitId ? 'responsible functional unit' : 'Student Support oversight unit';
+    const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">New complaint or service request registered</h2><p>A student matter has been registered with <strong>${htmlEscape(unitLabel)}</strong> as the ${htmlEscape(roleText)}.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #d4a72c"><strong>Reference:</strong> ${htmlEscape(ticket.reference)}<br><strong>Type:</strong> ${htmlEscape(ticket.type === 'service-request' ? 'Service request' : 'Complaint')}<br><strong>Category:</strong> ${htmlEscape(ticket.categoryLabel)}<br><strong>Subject:</strong> ${htmlEscape(ticket.subject)}</div><p><a href="${htmlEscape(portalUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Open unit register</a></p><p>The unit administrator should assign the matter to a staff email. The assignment remains red until the staff member opens the secure link, changes to yellow when opened, and changes to green when the resolution checklist is completed.</p><p>Regards,<br>Student Support Services<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+    await Promise.all(recipients.map(to => sendGmailHtmlEmail({to,subject:`New ${ticket.type === 'service-request' ? 'service request' : 'complaint'} registered - ${ticket.reference}`,html})));
+  }
+}
 
 const supportRateBuckets = new Map();
 function supportRateLimit(limit, windowMs = 60 * 60 * 1000) {
@@ -2188,6 +2246,10 @@ app.post('/api/support/tickets', supportRateLimit(12), supportUpload.array('evid
     const submittingStaff = staffSessionIdentity(req);
     const submittingUnits = normalizeStaffUnits(submittingStaff?.units);
     const assisted = submittingUnits.some(unit => ['coordinator','regional-administrator'].includes(unit));
+    const responsibleUnitId = payload.sensitive ? 'confidential-handler' : (payload.category.suggestedUnit || 'student-support');
+    const responsibleUnitLabel = STAFF_UNITS[responsibleUnitId]?.label || STAFF_UNITS['student-support'].label;
+    const supportRegistration = { id:crypto.randomUUID(), sourceUnit:'student', sourceLabel:'Student submission', targetUnit:'student-support', targetLabel:STAFF_UNITS['student-support'].label, comment:'Automatically registered with Student Support Services for acknowledgement, monitoring and follow-up.', status:responsibleUnitId==='student-support'?'assigned':'oversight', origin:'automatic-dual-registration', createdAt:now, reassignmentHistory:[] };
+    const responsibleRegistration = responsibleUnitId === 'student-support' ? null : { id:crypto.randomUUID(), sourceUnit:'student-support', sourceLabel:STAFF_UNITS['student-support'].label, targetUnit:responsibleUnitId, targetLabel:responsibleUnitLabel, comment:'Automatically routed from the selected complaint or service-request category.', status:'assigned', origin:'automatic-category-routing', createdAt:now, reassignmentHistory:[] };
     const ticket = {
       id: crypto.randomUUID(), reference: supportReference(), type: payload.type,
       categoryKey: payload.categoryKey || 'general', categoryLabel: payload.category.label,
@@ -2199,16 +2261,17 @@ app.post('/api/support/tickets', supportRateLimit(12), supportUpload.array('evid
       subject: payload.subject, description: payload.description,
       evidence: Array.isArray(req.files) ? req.files.map(fileRecord) : [],
       sensitive: payload.sensitive, confidentiality: payload.sensitive ? 'restricted' : 'standard', originRole: assisted ? (submittingUnits.includes('coordinator') ? 'centre-coordinator' : 'regional-administrator') : 'student', submittedBy: assisted ? (submittingStaff.name || submittingStaff.username || 'Authorised staff') : payload.name,
-      ownerUnit: payload.sensitive ? STAFF_UNITS['confidential-handler'].label : STAFF_UNITS['student-support'].label,
-      ownerUnitId: payload.sensitive ? 'confidential-handler' : 'student-support', intendedUnit: payload.category.owner, supportUnit: STAFF_UNITS['student-support'].label,
-      status: 'received', resolution: '', createdAt: now, acknowledgedAt: now,
+      ownerUnit: responsibleUnitLabel,
+      ownerUnitId: responsibleUnitId, intendedUnit: responsibleUnitLabel, supportUnit: STAFF_UNITS['student-support'].label, supportFollowUp:true,
+      status: responsibleUnitId === 'student-support' ? 'received' : 'assigned', resolution: '', createdAt: now, acknowledgedAt: now,
       lastUpdatedAt: now, assignmentDueAt: supportMoveWorkingDays(now, 2), dueAt: supportMoveWorkingDays(now, supportDueDays(payload.categoryKey, payload.priorityKey, payload.sensitive)),
-      auditTrail: [{ action: 'Ticket received', at: now, by: 'Student Support Services' }],
-      studentUpdates: [{ label: 'Ticket received', message: 'Your matter has been received by Student Support Services and is awaiting screening.', at: now }],
-      officerEvidence: [], referrals: payload.sensitive ? [{ id: crypto.randomUUID(), sourceUnit: 'student-support', sourceLabel: STAFF_UNITS['student-support'].label, targetUnit: 'confidential-handler', targetLabel: STAFF_UNITS['confidential-handler'].label, comment: 'Automatically registered in the restricted confidential-case workspace.', status: 'assigned', createdAt: now, reassignmentHistory: [] }] : [], interUnitMessages: []
+      auditTrail: [{ action: `Ticket registered with ${STAFF_UNITS['student-support'].label} and ${responsibleUnitLabel}`, note:'Automatic dual registration from the student submission category.', at:now, by:assisted?(submittingStaff.name||submittingStaff.username||'Authorised staff'):'Student' }],
+      studentUpdates: [{ label:'Ticket registered', message:responsibleUnitId==='student-support'?'Your matter has been registered with Student Support Services.':`Your matter has been registered with ${responsibleUnitLabel}, while Student Support Services monitors the same reference for follow-up.`, at:now }],
+      officerEvidence: [], referrals: [supportRegistration, ...(responsibleRegistration?[responsibleRegistration]:[])], registrations:[{unitId:'student-support',unitLabel:STAFF_UNITS['student-support'].label,role:responsibleUnitId==='student-support'?'responsible':'oversight',registeredAt:now},{unitId:responsibleUnitId,unitLabel:responsibleUnitLabel,role:'responsible',registeredAt:now}].filter((item,index,list)=>list.findIndex(other=>other.unitId===item.unitId)===index), staffAssignments:[], interUnitMessages: []
     };
     await mutateSupportTickets(tickets => { tickets.push(ticket); return ticket; });
     sendSupportAcknowledgementEmail(ticket, req).catch(error => console.error('Support acknowledgement email failed:', error.message));
+    sendSupportRegistrationEmails(ticket, req).catch(error => console.error('Support unit registration email failed:', error.message));
     res.status(201).json({ ok: true, ticket: supportPublicTicket(ticket), emailNotice: isEmail(ticket.email) && gmailConfigured() ? 'An acknowledgement email is being sent.' : 'Save the reference number to track this ticket.' });
   } catch (error) {
     console.error('Support ticket creation failed:', error);
@@ -2408,7 +2471,7 @@ app.get('/support-admin', supportWorkspaceAuth, (_req, res) => res.sendFile(path
 // Browser code contains no protected records. Serving it publicly lets the page
 // report an expired session instead of remaining on an unresponsive loading shell.
 app.get('/support-admin.js', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'support-admin.js')));
-app.get('/api/support/admin/me', supportWorkspaceAuth, async (req, res) => res.json({ ok:true, identity:{ name:req.supportIdentity?.name || req.supportIdentity?.username || 'Student Support officer', role:req.supportIdentity?.role || 'viewer', units:normalizeStaffUnits(req.supportIdentity?.units), confidentialAccess:canAccessSensitiveSupport(req.supportIdentity), developerPreview:Boolean(req.supportIdentity?.developerPreview), developerPreviewLabel:req.supportIdentity?.developerPreviewLabel || '', previewExpiresAt:req.supportIdentity?.previewExpiresAt || null } }));
+app.get('/api/support/admin/me', supportWorkspaceAuth, async (req, res) => res.json({ ok:true, identity:{ name:req.supportIdentity?.name || req.supportIdentity?.username || 'Student Support officer', role:req.supportIdentity?.role || 'viewer', units:normalizeStaffUnits(req.supportIdentity?.units).length?normalizeStaffUnits(req.supportIdentity?.units):(req.supportIdentity?.developer?['student-support']:[]), confidentialAccess:canAccessSensitiveSupport(req.supportIdentity), developerPreview:Boolean(req.supportIdentity?.developerPreview), developerPreviewLabel:req.supportIdentity?.developerPreviewLabel || '', previewExpiresAt:req.supportIdentity?.previewExpiresAt || null } }));
 app.post('/api/support/admin/lifecycle/refresh', supportWorkspaceAuth, requireSupportRole('officer'), async (_req, res) => {
   await refreshSupportLifecycle();
   res.json({ ok:true, refreshedAt:new Date().toISOString() });
@@ -2446,7 +2509,8 @@ app.get('/api/support/admin/tickets', supportWorkspaceAuth, async (req, res) => 
     categoryKey: ticket.categoryKey, category: ticket.categoryLabel, priority: ticket.priorityLabel, status: ticket.status, statusLabel: SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,
     priorityKey: ticket.priorityKey, ownerUnit: ticket.ownerUnit, ownerUnitId: ticket.ownerUnitId || '', assignedCaseOwner: ticket.assignedCaseOwner || '', intendedUnit: ticket.intendedUnit || '', supportUnit: ticket.supportUnit, studyCentre: ticket.studyCentre, programme: ticket.programme || '', academicDepartment: ticket.academicDepartment || '', subject: ticket.subject,
     description: ticket.description, originRole: ticket.originRole, sensitive: ticket.sensitive, createdAt: ticket.createdAt,
-    dueAt: ticket.dueAt, assignmentDueAt: ticket.assignmentDueAt || null, lastUpdatedAt: ticket.lastUpdatedAt, resolution: ticket.resolution || '', feedback: ticket.feedback || null, sla: supportSlaSummary(ticket), auditTrail: ticket.auditTrail || [], studentUpdates:ticket.studentUpdates||[], evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [], officerEvidence:Array.isArray(ticket.officerEvidence)?ticket.officerEvidence:[], forwardHistory: ticket.forwardHistory || [], referrals: ticket.referrals || [], interUnitMessages:ticket.interUnitMessages||[]
+    dueAt: ticket.dueAt, assignmentDueAt: ticket.assignmentDueAt || null, lastUpdatedAt: ticket.lastUpdatedAt, resolution: ticket.resolution || '', feedback: ticket.feedback || null, sla: supportSlaSummary(ticket), assignment:supportAssignmentSummary(ticket,[ticket.ownerUnitId]), assignments:supportAssignmentList(ticket), auditTrail: ticket.auditTrail || [], studentUpdates:ticket.studentUpdates||[],
+    evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [], officerEvidence: Array.isArray(ticket.officerEvidence) ? ticket.officerEvidence : [], forwardHistory: ticket.forwardHistory || [], referrals: ticket.referrals || [], registrations: ticket.registrations || [], interUnitMessages: ticket.interUnitMessages || []
   })) });
 });
 function supportCsvValue(value) {
@@ -2456,12 +2520,13 @@ function supportCsvValue(value) {
 }
 app.get('/api/support/admin/tickets.csv', supportWorkspaceAuth, async (req, res) => {
   const tickets = filterSupportAdminTickets(await readSupportTickets(), req.supportIdentity, req.query);
-  const headers = ['Reference','Created','Last updated','Status','Priority','Category','Matter type','Confidentiality','Student','Email','Phone','Student number','Study centre','Programme','Responsible unit','Assigned officer','Due','SLA','First response hours','Resolution hours','Feedback rating','Ease of use','Communication','Timeliness','Staff courtesy','Feedback resolved','Notification preference','Assistance language'];
+  const headers = ['Reference','Created','Last updated','Status','Priority','Category','Matter type','Confidentiality','Student','Email','Phone','Student number','Study centre','Programme','Responsible unit','Assignment indicator','Assigned staff','Assigned staff email','Assignment sent','Assignment opened','Assignment resolved','Due','SLA','First response hours','Resolution hours','Feedback rating','Ease of use','Communication','Timeliness','Staff courtesy','Feedback resolved','Notification preference','Assistance language'];
   const hours = (start, end) => start && end ? Math.max(0, (new Date(end).getTime() - new Date(start).getTime()) / 3600000).toFixed(1) : '';
   const rows = tickets.map(ticket => {
     const sla = supportSlaSummary(ticket);
+    const assignment = supportAssignmentSummary(ticket,[ticket.ownerUnitId]);
     const slaLabel = sla.overdue ? 'Overdue' : sla.atRisk ? 'At risk' : sla.paused ? 'Paused' : 'On track';
-    return [ticket.reference,ticket.createdAt,ticket.lastUpdatedAt,SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,ticket.priorityLabel,ticket.categoryLabel,ticket.type,ticket.sensitive ? 'Restricted' : 'Standard',ticket.name,ticket.email,ticket.phone,ticket.studentNumber,ticket.studyCentre,ticket.programme,ticket.ownerUnit,ticket.assignedCaseOwner,ticket.dueAt,slaLabel,hours(ticket.createdAt,ticket.firstResponseAt),hours(ticket.createdAt,ticket.resolvedAt),ticket.feedback?.rating || '',ticket.feedback?.easeOfUse || '',ticket.feedback?.communication || '',ticket.feedback?.timeliness || '',ticket.feedback?.staffCourtesy || '',ticket.feedback?.resolved || '',ticket.notificationPreference || 'email',SUPPORT_LANGUAGES[ticket.language] || SUPPORT_LANGUAGES.en].map(supportCsvValue).join(',');
+    return [ticket.reference,ticket.createdAt,ticket.lastUpdatedAt,SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,ticket.priorityLabel,ticket.categoryLabel,ticket.type,ticket.sensitive ? 'Restricted' : 'Standard',ticket.name,ticket.email,ticket.phone,ticket.studentNumber,ticket.studyCentre,ticket.programme,ticket.ownerUnit,assignment.label,assignment.officerName || ticket.assignedCaseOwner,assignment.officerEmail,assignment.assignedAt,assignment.openedAt,assignment.resolvedAt,ticket.dueAt,slaLabel,hours(ticket.createdAt,ticket.firstResponseAt),hours(ticket.createdAt,ticket.resolvedAt),ticket.feedback?.rating || '',ticket.feedback?.easeOfUse || '',ticket.feedback?.communication || '',ticket.feedback?.timeliness || '',ticket.feedback?.staffCourtesy || '',ticket.feedback?.resolved || '',ticket.notificationPreference || 'email',SUPPORT_LANGUAGES[ticket.language] || SUPPORT_LANGUAGES.en].map(supportCsvValue).join(',');
   });
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="student-support-cases-${supportDateKey(new Date())}.csv"`);
@@ -2610,6 +2675,71 @@ function supportEmailsAreInstitutional(emails) {
     return [...SUPPORT_ALLOWED_EMAIL_DOMAINS].some(allowed => domain === allowed || domain.endsWith(`.${allowed}`));
   });
 }
+async function createSupportStaffAssignment(req, res, { identity, allowedUnits }) {
+  const unitId = String(req.body?.unitId || '').trim();
+  const officerEmail = String(req.body?.officerEmail || '').trim().toLowerCase();
+  const officerName = cleanHumanText(req.body?.officerName || '').slice(0, 180);
+  const units = normalizeStaffUnits(allowedUnits);
+  if (!STAFF_UNITS[unitId] || !units.includes(unitId)) return res.status(403).json({ error:'You may assign staff only for a functional unit you administer.' });
+  if (!isEmail(officerEmail)) return res.status(400).json({ error:'Enter a valid staff email address.' });
+  if (!supportEmailsAreInstitutional([officerEmail])) return res.status(400).json({ error:'Use an approved institutional staff email address.' });
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const assignmentId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + SUPPORT_FORWARD_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const actor = identity?.name || identity?.username || 'Functional-unit administrator';
+  let assignedTicket = null;
+  await mutateSupportTickets(tickets => {
+    const ticket = tickets.find(item => item.id === req.params.id);
+    if (!ticket || (ticket.ownerUnitId !== unitId && !activeReferralForUnits(ticket,[unitId]))) return tickets;
+    if (ticket.sensitive && !['confidential-handler','provost'].includes(unitId)) return tickets;
+    ticket.staffAssignments = Array.isArray(ticket.staffAssignments) ? ticket.staffAssignments : [];
+    for (const assignment of ticket.staffAssignments) {
+      if (assignment.unitId === unitId && !['resolved','superseded'].includes(assignment.state)) {
+        assignment.state = 'superseded';
+        assignment.supersededAt = now;
+        assignment.supersededBy = actor;
+      }
+    }
+    ticket.staffAssignments.push({ id:assignmentId, unitId, unitLabel:STAFF_UNITS[unitId].label, officerName:officerName || officerEmail.split('@')[0], officerEmail, assignedBy:actor, assignedAt:now, expiresAt, tokenHash:hashOneTimeToken(rawToken), state:'unopened', emailStatus:'pending', checks:{}, openedAt:null, resolvedAt:null, resolutionNote:'' });
+    ticket.assignedCaseOwner = officerName || officerEmail;
+    ticket.assignedCaseEmail = officerEmail;
+    ticket.assignmentDueAt = supportMoveWorkingDays(now, 2);
+    if (!['resolved','final-decision','closed','accepted'].includes(ticket.status)) ticket.status = 'assigned';
+    ticket.lastUpdatedAt = now;
+    ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
+    ticket.auditTrail.push({ action:`Assigned to ${officerEmail}`, note:`${STAFF_UNITS[unitId].label} staff assignment created. Register indicator is red until the secure link is opened.`, at:now, by:actor });
+    assignedTicket = JSON.parse(JSON.stringify(ticket));
+    return tickets;
+  });
+  if (!assignedTicket) return res.status(404).json({ error:'This complaint or request is not registered with the selected functional unit.' });
+  const secureUrl = `${baseUrlFor(req)}/secure/support-assignment/${rawToken}`;
+  let emailStatus = 'not-configured';
+  let emailError = '';
+  if (gmailConfigured()) {
+    try {
+      const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Complaint or request assigned to you</h2><p>Dear ${htmlEscape(officerName || 'Staff Member')},</p><p>${htmlEscape(STAFF_UNITS[unitId].label)} has assigned the matter below to you.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #c6404d"><strong>Reference:</strong> ${htmlEscape(assignedTicket.reference)}<br><strong>Type:</strong> ${htmlEscape(assignedTicket.type === 'service-request' ? 'Service request' : 'Complaint')}<br><strong>Category:</strong> ${htmlEscape(assignedTicket.categoryLabel)}<br><strong>Subject:</strong> ${htmlEscape(assignedTicket.subject)}</div><p><a href="${htmlEscape(secureUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Open assigned case</a></p><p>The register is currently red. It changes to yellow when you open this secure link and changes to green after you complete the resolution checklist.</p><p>This personal link expires on ${htmlEscape(new Date(expiresAt).toLocaleDateString('en-GB'))}. Do not forward it to another person.</p><p>Regards,<br>${htmlEscape(STAFF_UNITS[unitId].label)}<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+      await sendGmailHtmlEmail({to:officerEmail,subject:`Assigned support matter - ${assignedTicket.reference}`,html});
+      emailStatus = 'sent';
+    } catch (error) {
+      emailStatus = 'failed';
+      emailError = String(error.message || error).slice(0, 300);
+    }
+  }
+  await mutateSupportTickets(tickets => {
+    const assignment = tickets.find(ticket => ticket.id === req.params.id)?.staffAssignments?.find(item => item.id === assignmentId);
+    if (assignment) { assignment.emailStatus = emailStatus; assignment.emailSentAt = emailStatus === 'sent' ? new Date().toISOString() : null; assignment.emailError = emailError; }
+    return tickets;
+  });
+  const assignment = supportAssignmentSummary({ staffAssignments:assignedTicket.staffAssignments }, [unitId]);
+  return res.json({ ok:true, reference:assignedTicket.reference, assignment:{...assignment,emailStatus}, secureUrl, message:emailStatus==='sent'?'The staff assignment email was sent.':emailStatus==='failed'?'The assignment was registered, but email delivery failed. Copy the secure link or correct the email settings and assign again.':'The assignment was registered. Email delivery is not configured, so copy the secure link to the assigned staff member.' });
+}
+
+app.post('/api/support/admin/tickets/:id/staff-assignments', supportWorkspaceAuth, requireSupportRole('administrator'), async(req,res)=>{
+  const identity=req.supportIdentity||{};
+  const allowedUnits=normalizeStaffUnits(identity.units).length?identity.units:(identity.developer?['student-support']:[]);
+  return createSupportStaffAssignment(req,res,{identity,allowedUnits});
+});
 app.post('/api/support/admin/tickets/:id/messages', supportWorkspaceAuth, requireSupportRole('officer'), async(req,res)=>{
   const targetUnit=String(req.body?.targetUnit||'').trim();
   const recipientName=STAFF_UNITS[targetUnit]?.label || '';
@@ -2662,11 +2792,20 @@ app.post('/api/support/admin/tickets/:id/forward', supportWorkspaceAuth, require
     ticket.forwardHistory.push(forward);
     ticket.referrals = Array.isArray(ticket.referrals) ? ticket.referrals : [];
     ticket.referrals.push({ id: forwardId, sourceUnit: 'student-support', sourceLabel: STAFF_UNITS['student-support'].label, targetUnit: recipientUnit, targetLabel: STAFF_UNITS[recipientUnit].label, officeName, officeEmail, comment, status: 'registered', createdAt: now, reassignmentHistory: [] });
+    ticket.registrations = Array.isArray(ticket.registrations) ? ticket.registrations : [];
+    if (!ticket.registrations.some(item => item.unitId === recipientUnit)) ticket.registrations.push({ unitId:recipientUnit, unitLabel:STAFF_UNITS[recipientUnit].label, role:'responsible-unit', registeredAt:now, status:'active' });
+    ticket.staffAssignments = Array.isArray(ticket.staffAssignments) ? ticket.staffAssignments : [];
+    for (const assignment of ticket.staffAssignments) {
+      if (assignment.unitId === ticket.ownerUnitId && !['resolved','superseded'].includes(assignment.state)) {
+        assignment.state = 'superseded'; assignment.supersededAt = now; assignment.supersededBy = req.supportIdentity?.name || 'Student Support Services';
+      }
+    }
     ticket.ownerUnit = STAFF_UNITS[recipientUnit].label;
     ticket.ownerUnitId = recipientUnit;
     ticket.supportUnit = STAFF_UNITS['student-support'].label;
     ticket.supportFollowUp = true;
-    ticket.assignedCaseOwner = req.supportIdentity?.name || 'Student Support Services';
+    ticket.assignedCaseOwner = '';
+    ticket.assignedCaseEmail = '';
     ticket.status = 'assigned';
     ticket.lastUpdatedAt = now;
     ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
@@ -2738,9 +2877,22 @@ async function reassignSupportReferral(ticketId, { targetUnit, note, actor, sour
       createdAt: now, reassignmentHistory: []
     };
     ticket.referrals.push(referral);
+    ticket.registrations = Array.isArray(ticket.registrations) ? ticket.registrations : [];
+    if (!ticket.registrations.some(item => item.unitId === targetUnit)) {
+      ticket.registrations.push({ unitId:targetUnit, unitLabel:STAFF_UNITS[targetUnit].label, role:'responsible-unit', registeredAt:now, status:'active' });
+    }
+    ticket.staffAssignments = Array.isArray(ticket.staffAssignments) ? ticket.staffAssignments : [];
+    for (const assignment of ticket.staffAssignments) {
+      if (assignment.unitId === sourceUnit && !['resolved','superseded'].includes(assignment.state)) {
+        assignment.state = 'superseded';
+        assignment.supersededAt = now;
+        assignment.supersededBy = actor;
+      }
+    }
     ticket.ownerUnit = STAFF_UNITS[targetUnit].label;
     ticket.ownerUnitId = targetUnit;
-    ticket.assignedCaseOwner = actor;
+    ticket.assignedCaseOwner = '';
+    ticket.assignedCaseEmail = '';
     ticket.status = 'assigned';
     ticket.lastUpdatedAt = now;
     ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
@@ -2768,6 +2920,54 @@ app.post('/api/support/admin/tickets/:id/reassign', supportWorkspaceAuth, requir
   if (!note) return res.status(400).json({ error: 'Provide reassignment comments for the receiving unit.' });
   const result = await reassignSupportReferral(req.params.id, { targetUnit, note, actor: req.supportIdentity?.name || 'Student Support Services', sourceUnits: ['student-support'], allowUnassigned: true });
   return reassignSupportReferralResponse(result, res, req);
+});
+
+function secureSupportAssignmentPage(ticket, assignment, token, notice = '') {
+  const state=supportAssignmentState(assignment);
+  const framedEvidence=(files,collection,emptyText)=>Array.isArray(files)&&files.length
+    ? `<div class="assignment-evidence">${files.map((file,index)=>{const url=`/secure/support-assignment/${encodeURIComponent(token)}/${collection}/${index}`;const name=htmlEscape(file.originalName||`Evidence ${index+1}`);return `<section><strong>${name}</strong><iframe src="${url}" title="${name}"></iframe><a href="${url}?download=1">Download original</a></section>`;}).join('')}</div>`
+    : `<p>${emptyText}</p>`;
+  const resolved=assignment.state==='resolved';
+  const checklist=SUPPORT_ASSIGNMENT_CHECKS.map(item=>`<label class="resolution-check"><input type="checkbox" name="${item.id}" value="yes" ${resolved?'checked disabled':'required'}><span>${htmlEscape(item.label)}</span></label>`).join('');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${htmlEscape(ticket.reference)} Staff Assignment</title><style>:root{--navy:#082b4c;--gold:#d4a72c;--green:#238154;--red:#c6404d;--yellow:#d79a00;--line:#d9e3ea}*{box-sizing:border-box}body{margin:0;background:#f4f7fa;color:#172431;font:16px/1.55 Arial,sans-serif}.wrap{max-width:960px;margin:32px auto;padding:0 18px 50px}.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:24px;box-shadow:0 10px 28px rgba(15,38,61,.08);margin-bottom:18px}h1,h2{color:var(--navy)}h1{font-size:28px;margin:4px 0}.eyebrow{color:#956f00;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.state{display:inline-flex;padding:7px 11px;border-radius:999px;font-weight:800;font-size:14px}.state-red{background:#fde8ea;color:#982b38}.state-yellow{background:#fff1c9;color:#795400}.state-green{background:#def3e7;color:#11683a}.meta{display:grid;grid-template-columns:180px 1fr;gap:8px 14px;padding:15px;background:#f4f8fb;border-radius:9px}.copy{white-space:pre-wrap}.assignment-evidence{display:grid;gap:16px}.assignment-evidence section{display:grid;gap:8px}.assignment-evidence iframe{width:100%;height:430px;border:1px solid var(--line);border-radius:8px}.assignment-evidence a{color:var(--navy);font-weight:800}.resolution-form{display:grid;gap:12px}.resolution-check{display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--line);border-radius:9px}.resolution-check input{width:20px;height:20px;accent-color:var(--green)}textarea{width:100%;min-height:120px;padding:11px;border:1px solid #b9c7d1;border-radius:8px;font:inherit}.button{border:0;border-radius:8px;background:var(--green);color:#fff;padding:12px 17px;font:inherit;font-weight:800;cursor:pointer}.notice{padding:12px 14px;border-left:4px solid var(--green);background:#eaf7ef;color:#145f38;margin-bottom:16px}@media(max-width:650px){.meta{grid-template-columns:1fr}.assignment-evidence iframe{height:320px}}</style></head><body><main class="wrap">${notice?`<div class="notice">${htmlEscape(notice)}</div>`:''}<section class="card"><span class="eyebrow">Assigned staff workspace</span><h1>${htmlEscape(ticket.reference)}</h1><p><span class="state state-${state.colour}">${htmlEscape(state.label)}</span></p><div class="meta"><b>Functional unit</b><span>${htmlEscape(assignment.unitLabel)}</span><b>Assigned staff</b><span>${htmlEscape(assignment.officerName)} · ${htmlEscape(assignment.officerEmail)}</span><b>Type</b><span>${htmlEscape(ticket.type==='service-request'?'Service request':'Complaint')}</span><b>Category</b><span>${htmlEscape(ticket.categoryLabel)}</span><b>Student</b><span>${htmlEscape(ticket.name)} · ${htmlEscape(ticket.studentNumber||'Number not stated')}</span><b>Study centre</b><span>${htmlEscape(ticket.studyCentre||'Not stated')}</span><b>Subject</b><span>${htmlEscape(ticket.subject)}</span></div><h2>Student submission</h2><p class="copy">${htmlEscape(ticket.description)}</p></section><section class="card"><h2>Student evidence</h2>${framedEvidence(ticket.evidence,'evidence','No student evidence was attached.')}<h2>Officer evidence</h2>${framedEvidence(ticket.officerEvidence,'officer-evidence','No officer evidence has been added.')}</section><section class="card"><h2>${resolved?'Resolution completed':'Complete this assignment'}</h2>${resolved?`<p><strong>Resolved:</strong> ${htmlEscape(new Date(assignment.resolvedAt).toLocaleString('en-GB'))}</p><p class="copy">${htmlEscape(assignment.resolutionNote)}</p>`:`<p>All three confirmations and a clear resolution note are required. Completing this form changes the assignment indicator from yellow to green in every authorised register.</p><form class="resolution-form" method="post" action="/secure/support-assignment/${encodeURIComponent(token)}/resolve">${checklist}<label><strong>Resolution provided to the student and oversight units</strong><textarea name="resolutionNote" minlength="10" maxlength="4000" required></textarea></label><button class="button" type="submit">Mark complaint or request resolved</button></form>`}</section></main></body></html>`;
+}
+
+app.get('/secure/support-assignment/:token', async(req,res)=>{
+  const match=supportAssignmentForToken(await readSupportTickets(),req.params.token);
+  if(!match||match.assignment.state==='superseded')return res.status(404).send('This staff assignment link is unavailable.');
+  if(new Date(match.assignment.expiresAt).getTime()<=Date.now()&&match.assignment.state!=='resolved')return res.status(410).send('This staff assignment link has expired. Ask the functional-unit administrator to assign the case again.');
+  if(match.assignment.state==='unopened'){
+    const now=new Date().toISOString();
+    await mutateSupportTickets(tickets=>{const ticket=tickets.find(item=>item.id===match.ticket.id),assignment=ticket?.staffAssignments?.find(item=>item.id===match.assignment.id);if(!ticket||!assignment)return tickets;assignment.state='opened';assignment.openedAt=now;ticket.lastUpdatedAt=now;if(ticket.ownerUnitId===assignment.unitId&&!['resolved','final-decision','closed','accepted'].includes(ticket.status))ticket.status='in-progress';const referral=[...(ticket.referrals||[])].reverse().find(item=>item.targetUnit===assignment.unitId&&!['reassigned','resolved','closed'].includes(item.status));if(referral){referral.status='opened';referral.openedAt=now;}ticket.auditTrail=Array.isArray(ticket.auditTrail)?ticket.auditTrail:[];ticket.auditTrail.push({action:`Assignment opened by ${assignment.officerEmail}`,note:'Register indicator changed from red to yellow.',at:now,by:assignment.officerName||assignment.officerEmail});return tickets;});
+    match.assignment.state='opened';match.assignment.openedAt=now;
+  }
+  res.setHeader('Cache-Control','no-store');
+  return res.send(secureSupportAssignmentPage(match.ticket,match.assignment,req.params.token));
+});
+app.post('/secure/support-assignment/:token/resolve', supportSameOrigin, async(req,res)=>{
+  const checks=Object.fromEntries(SUPPORT_ASSIGNMENT_CHECKS.map(item=>[item.id,String(req.body?.[item.id]||'')==='yes']));
+  const resolutionNote=String(req.body?.resolutionNote||'').trim().slice(0,4000);
+  if(Object.values(checks).some(value=>!value)||resolutionNote.length<10)return res.status(400).send('Complete all resolution checkboxes and provide a clear resolution note of at least 10 characters.');
+  const found=supportAssignmentForToken(await readSupportTickets(),req.params.token);
+  if(!found||found.assignment.state==='superseded')return res.status(404).send('This staff assignment link is unavailable.');
+  if(new Date(found.assignment.expiresAt).getTime()<=Date.now()&&found.assignment.state!=='resolved')return res.status(410).send('This staff assignment link has expired.');
+  const now=new Date().toISOString();let updated=null,isResponsible=false;
+  await mutateSupportTickets(tickets=>{const ticket=tickets.find(item=>item.id===found.ticket.id),assignment=ticket?.staffAssignments?.find(item=>item.id===found.assignment.id);if(!ticket||!assignment)return tickets;assignment.state='resolved';assignment.resolvedAt=assignment.resolvedAt||now;assignment.checks=checks;assignment.resolutionNote=resolutionNote;ticket.lastUpdatedAt=now;isResponsible=ticket.ownerUnitId===assignment.unitId;if(isResponsible){ticket.status='resolved';ticket.resolution=resolutionNote;ticket.resolvedAt=now;ticket.resolvedBy=assignment.officerName||assignment.officerEmail;ticket.studentResponseDueAt=supportMoveWorkingDays(now,5);ticket.studentUpdates=Array.isArray(ticket.studentUpdates)?ticket.studentUpdates:[];ticket.studentUpdates.push({label:'Resolution proposed',message:resolutionNote,at:now});}const referral=[...(ticket.referrals||[])].reverse().find(item=>item.targetUnit===assignment.unitId&&!['reassigned','closed'].includes(item.status));if(referral){referral.status='resolved';referral.resolvedAt=now;}ticket.auditTrail=Array.isArray(ticket.auditTrail)?ticket.auditTrail:[];ticket.auditTrail.push({action:`Assignment resolved by ${assignment.officerEmail}`,note:`Register indicator changed to green. ${resolutionNote}`,at:now,by:assignment.officerName||assignment.officerEmail});updated=JSON.parse(JSON.stringify(ticket));return tickets;});
+  if(!updated)return res.status(404).send('This staff assignment link is unavailable.');
+  if(isResponsible)sendSupportStudentUpdateEmail(updated,{label:'Resolution proposed',message:resolutionNote},req).catch(error=>console.error('Assigned-staff resolution email failed:',error.message));
+  const assignment=updated.staffAssignments.find(item=>item.id===found.assignment.id);
+  res.setHeader('Cache-Control','no-store');
+  return res.send(secureSupportAssignmentPage(updated,assignment,req.params.token,'Resolution recorded. The assignment indicator is now green in every authorised register.'));
+});
+app.get('/secure/support-assignment/:token/:collection/:index', async(req,res)=>{
+  const match=supportAssignmentForToken(await readSupportTickets(),req.params.token);
+  if(!match||match.assignment.state==='superseded')return res.status(404).send('This staff assignment link is unavailable.');
+  if(new Date(match.assignment.expiresAt).getTime()<=Date.now()&&match.assignment.state!=='resolved')return res.status(410).send('This staff assignment link has expired.');
+  const collection=req.params.collection==='officer-evidence'?'officerEvidence':req.params.collection==='evidence'?'evidence':'';
+  if(!collection)return res.status(404).send('Evidence file not found.');
+  const evidence=supportEvidenceFor(match.ticket,req.params.index,collection);
+  if(!evidence)return res.status(404).send('Evidence file not found.');
+  return sendSupportEvidence(req,res,evidence);
 });
 
 app.get('/secure/support/:token', async (req, res) => {
@@ -4500,7 +4700,7 @@ function supportDashboardTickets(tickets, unitId) {
   if(unitId==='provost') return tickets;
   if(unitId==='confidential-handler') return tickets.filter(ticket=>ticket.sensitive);
   if(unitId==='student-support'||unitId==='quality-assurance') return visible;
-  if(unitId==='college-registrar') return visible.filter(ticket=>['certificate','change-of-name','transcript','incomplete-result'].includes(ticket.categoryKey));
+  if(unitId==='college-registrar') return visible.filter(ticket=>['certificate','change-of-name','transcript','incomplete-result','deferment','resumption-deferment','resumption-rustication','registration-challenge'].includes(ticket.categoryKey));
   if(unitId==='college-finance') return visible.filter(ticket=>ticket.categoryKey==='fees-payment');
   if(['directorate-education-business','directorate-arts-stem'].includes(unitId)) return visible.filter(ticket=>['programme-department','assessment-project'].includes(ticket.categoryKey));
   if(unitId==='coordinator') return visible.filter(ticket=>ticket.originRole==='centre-coordinator');
@@ -4586,12 +4786,13 @@ function supportSafeSheetValue(value) {
   return /^[=+\-@]/.test(text) ? `'${text}` : text;
 }
 function supportRegisterAoA(tickets) {
-  const headers = ['S/N','REFERENCE','CREATED','LAST UPDATED','MATTER TYPE','STATUS','PRIORITY','CATEGORY','CONFIDENTIALITY','STUDENT','EMAIL','PHONE','STUDENT NUMBER','STUDY CENTRE','PROGRAMME','RESPONSIBLE UNIT','ASSIGNED OFFICER','DUE','SLA','FIRST RESPONSE HOURS','RESOLUTION HOURS','OVERALL RATING','EASE OF USE','COMMUNICATION','TIMELINESS','STAFF COURTESY','RESOLVED BY STUDENT','NOTIFICATION PREFERENCE','ASSISTANCE LANGUAGE'];
+  const headers = ['S/N','REFERENCE','CREATED','LAST UPDATED','MATTER TYPE','STATUS','PRIORITY','CATEGORY','CONFIDENTIALITY','STUDENT','EMAIL','PHONE','STUDENT NUMBER','STUDY CENTRE','PROGRAMME','RESPONSIBLE UNIT','ASSIGNMENT INDICATOR','ASSIGNED STAFF','ASSIGNED STAFF EMAIL','ASSIGNMENT SENT','ASSIGNMENT OPENED','ASSIGNMENT RESOLVED','DUE','SLA','FIRST RESPONSE HOURS','RESOLUTION HOURS','OVERALL RATING','EASE OF USE','COMMUNICATION','TIMELINESS','STAFF COURTESY','RESOLVED BY STUDENT','NOTIFICATION PREFERENCE','ASSISTANCE LANGUAGE'];
   const hours=(start,end)=>start&&end?Number(Math.max(0,(new Date(end).getTime()-new Date(start).getTime())/3600000).toFixed(1)):'';
   const rows=tickets.slice().sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))).map((ticket,index)=>{
     const sla=supportSlaSummary(ticket);
+    const assignment=supportAssignmentSummary(ticket,[ticket.ownerUnitId]);
     const slaLabel=sla.overdue?'Overdue':sla.atRisk?'At risk':sla.paused?'Paused':'On track';
-    return [index+1,ticket.reference,ticket.createdAt,ticket.lastUpdatedAt,ticket.type,SUPPORT_STATUS_LABELS[ticket.status]||ticket.status,ticket.priorityLabel,ticket.categoryLabel,ticket.sensitive?'Restricted':'Standard',ticket.name,ticket.email,ticket.phone,ticket.studentNumber,ticket.studyCentre,ticket.programme,ticket.ownerUnit,ticket.assignedCaseOwner,ticket.dueAt,slaLabel,hours(ticket.createdAt,ticket.firstResponseAt),hours(ticket.createdAt,ticket.resolvedAt),ticket.feedback?.rating||'',ticket.feedback?.easeOfUse||'',ticket.feedback?.communication||'',ticket.feedback?.timeliness||'',ticket.feedback?.staffCourtesy||'',ticket.feedback?.resolved||'',ticket.notificationPreference||'email',SUPPORT_LANGUAGES[ticket.language]||SUPPORT_LANGUAGES.en].map(supportSafeSheetValue);
+    return [index+1,ticket.reference,ticket.createdAt,ticket.lastUpdatedAt,ticket.type,SUPPORT_STATUS_LABELS[ticket.status]||ticket.status,ticket.priorityLabel,ticket.categoryLabel,ticket.sensitive?'Restricted':'Standard',ticket.name,ticket.email,ticket.phone,ticket.studentNumber,ticket.studyCentre,ticket.programme,ticket.ownerUnit,assignment.label,assignment.officerName||ticket.assignedCaseOwner,assignment.officerEmail,assignment.assignedAt,assignment.openedAt,assignment.resolvedAt,ticket.dueAt,slaLabel,hours(ticket.createdAt,ticket.firstResponseAt),hours(ticket.createdAt,ticket.resolvedAt),ticket.feedback?.rating||'',ticket.feedback?.easeOfUse||'',ticket.feedback?.communication||'',ticket.feedback?.timeliness||'',ticket.feedback?.staffCourtesy||'',ticket.feedback?.resolved||'',ticket.notificationPreference||'email',SUPPORT_LANGUAGES[ticket.language]||SUPPORT_LANGUAGES.en].map(supportSafeSheetValue);
   });
   return [headers,...rows];
 }
@@ -4605,7 +4806,7 @@ function supportWorkbookBuffer(tickets, includeRegister = true) {
   addSheet(workbook,'Summary',[['SERVICE PERFORMANCE SUMMARY','VALUE'],['Generated at',new Date().toISOString()],['Total cases',overall.total],['Complaints',overall.complaints],['Service requests',overall.requests],['Open cases',overall.open],['Resolved or closed',overall.resolved],['Overdue',overall.overdue],['At risk',overall.atRisk],['SLA compliance %',overall.slaCompliance??''],['Feedback responses',overall.feedbackResponses],['Feedback response rate %',overall.feedbackRate??''],['Average satisfaction /5',overall.satisfaction??''],['Average resolution hours',overall.averageResolutionHours??'']],[34,24]);
   addSheet(workbook,'By Study Centre',supportPerformanceAoA(supportGroupedPerformance(tickets,'centre'),'STUDY CENTRE'),[38,12,14,18,12,18,12,12,20,20,18,18,14,20,14,14,22]);
   addSheet(workbook,'By Functional Unit',supportPerformanceAoA(supportGroupedPerformance(tickets,'unit'),'FUNCTIONAL UNIT'),[42,12,14,18,12,18,12,12,20,20,18,18,14,20,14,14,22]);
-  if (includeRegister) addSheet(workbook,'Complaint Request Register',supportRegisterAoA(tickets),[8,23,22,22,18,22,14,28,18,28,30,18,20,30,30,34,24,22,16,22,22,16,16,18,16,18,22,24,22]);
+  if (includeRegister) addSheet(workbook,'Complaint Request Register',supportRegisterAoA(tickets),[8,23,22,22,18,22,14,28,18,28,30,18,20,30,30,34,28,24,30,22,22,22,22,16,22,22,16,16,18,16,18,22,24,22]);
   return XLSX.write(workbook,{type:'buffer',bookType:'xlsx'});
 }
 function sendSupportWorkbook(res, tickets, filename, performanceOnly = false) {
@@ -4676,14 +4877,16 @@ app.get('/api/staff/support-performance.xlsx', staffAuth, async(req,res)=>{
   const tickets=filterSupportReportTickets(supportTicketsForStaffIdentity(await readSupportTickets(),req.staffIdentity),req.query);
   sendSupportWorkbook(res,tickets,`support-performance-${supportDateKey(new Date())}.xlsx`,true);
 });
-function staffReferralTicket(ticket) {
+function staffReferralTicket(ticket, unitIds = []) {
+  const activeUnitIds = normalizeStaffUnits(unitIds).filter(unitId => ticket.ownerUnitId === unitId || Boolean(activeReferralForUnits(ticket,[unitId])));
   return {
     id: ticket.id, reference: ticket.reference, name: ticket.name, email: ticket.email, type: ticket.type,
     studyLevel: ticket.studyLevelLabel || '', category: ticket.categoryLabel, priority: ticket.priorityLabel,
     status: ticket.status, statusLabel: SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,
     ownerUnit: ticket.ownerUnit, subject: ticket.subject, description: ticket.description, studyCentre: ticket.studyCentre,
     lastUpdatedAt: ticket.lastUpdatedAt, dueAt: ticket.dueAt || null, assignedCaseOwner: ticket.assignedCaseOwner || '', sensitive: Boolean(ticket.sensitive), sla: supportSlaSummary(ticket), evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [],
-    officerEvidence: Array.isArray(ticket.officerEvidence) ? ticket.officerEvidence : [], referrals: ticket.referrals || [],
+    officerEvidence: Array.isArray(ticket.officerEvidence) ? ticket.officerEvidence : [], referrals: ticket.referrals || [], registrations:ticket.registrations || [],
+    assignment:supportAssignmentSummary(ticket,unitIds), assignments:supportAssignmentList(ticket), activeUnitIds,
     interUnitMessages: ticket.interUnitMessages || [], studentUpdates: ticket.studentUpdates || [], auditTrail: ticket.auditTrail || [], feedback:ticket.feedback || null,
     notificationPreference:ticket.notificationPreference || 'email', language:ticket.language || 'en'
   };
@@ -4694,8 +4897,12 @@ app.get('/api/staff/referrals', staffAuth, async(req, res) => {
   const tickets = await readSupportTickets();
   const referrals = tickets.filter(ticket => (!ticket.sensitive || unitIds.some(unit => ['confidential-handler','provost'].includes(unit))) && ((ticket.referrals || []).some(referral => unitIds.includes(referral.targetUnit)) || (ticket.interUnitMessages || []).some(message => unitIds.includes(message.targetUnit))))
     .sort((a,b) => String(b.lastUpdatedAt || b.createdAt).localeCompare(String(a.lastUpdatedAt || a.createdAt)))
-    .map(staffReferralTicket);
+    .map(ticket => staffReferralTicket(ticket, unitIds));
   res.json({ ok: true, referrals });
+});
+app.post('/api/staff/referrals/:id/staff-assignments', staffAuth, async(req,res)=>{
+  if ((ROLE_RANK[req.staffIdentity?.role] || 0) < ROLE_RANK.administrator) return res.status(403).json({ error:'Only a functional-unit administrator may assign a complaint or request to staff.' });
+  return createSupportStaffAssignment(req,res,{identity:req.staffIdentity,allowedUnits:req.staffIdentity?.units||[]});
 });
 app.get('/api/staff/referrals/:id/:collection/:index', staffAuth, async(req, res) => {
   const collection = req.params.collection === 'officer-evidence' ? 'officerEvidence' : req.params.collection === 'evidence' ? 'evidence' : '';
@@ -4799,7 +5006,7 @@ app.patch('/api/staff/referrals/:id', staffAuth, async (req, res) => {
     const studentMessage = updated.studentUpdates?.[updated.studentUpdates.length - 1];
     sendSupportStudentUpdateEmail(updated, studentMessage || { label: 'Case updated', message: note }, req).catch(error => console.error('Functional-unit update email failed:', error.message));
   }
-  return res.json({ ok: true, ticket: staffReferralTicket(updated) });
+  return res.json({ ok: true, ticket: staffReferralTicket(updated, unitIds) });
 });
 app.post('/api/staff/referrals/:id/reassign', staffAuth, async(req, res) => {
   if ((ROLE_RANK[req.staffIdentity?.role] || 0) < ROLE_RANK.officer) return res.status(403).json({ error: 'Your staff role is read-only. An officer or administrator must reassign a case.' });

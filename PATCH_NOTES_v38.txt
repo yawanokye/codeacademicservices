@@ -1,0 +1,41 @@
+CoDE Academic Services Portal v38.0.0
+Deferment, resumption and registration requests
+
+New service-request categories
+
+1. Request for Deferment
+   Responsible unit: Student Support Services Unit
+
+2. Request for Resumption from Deferment
+   Responsible unit: Student Support Services Unit
+
+3. Request for Resumption from Rustication
+   Responsible unit: Student Support Services Unit
+
+4. Registration Challenge
+   Responsible unit: Registration Officer Portal
+   Student Support Services also receives the same permanent reference for monitoring and follow-up.
+
+Registration Officer Portal
+
+- Added as a distinct functional unit.
+- Can be opened through the Developer Portal preview controls.
+- Can be assigned to viewer, officer or administrator staff accounts.
+- Receives registration challenges automatically.
+- Supports assignment by institutional email, secure staff links, red/yellow/green status indicators, evidence, reassignment, audit history and downloadable registers.
+
+Student guidance
+
+- Added all four categories to the public Student Support form and Centre Coordinator assisted-submission form.
+- Added frequently requested service links.
+- Added category-specific evidence guidance.
+- Added English, Twi and French knowledge-base entries.
+
+Verification
+
+- JavaScript syntax checks passed.
+- Protected-portal DOM contract checks passed.
+- Automated integration checks passed for all 19 functional units and 9 department or operations roles.
+- Routing checks confirm the three deferment or resumption requests go to Student Support Services and registration challenges go to the Registration Officer Portal while remaining visible to Student Support.
+
+No new environment variable or npm dependency is required.

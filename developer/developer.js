@@ -2,7 +2,10 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const portalLabels={'project-work':'Undergraduate Project Work','field-experience':'Field Experience and Teaching Practice','dissertation':'Dissertation','assessor':'Assessment/Vetting Reports','payroll':'Payroll Portal','auditor':"Auditor's Portal"};
 const deptLabels={'education':'Education','business':'Business','arts-social-sciences':'Arts & Social Sciences','science-mathematics':'Science & Mathematics'};
 const unitLabels={'student-support':'Student Support Services','student-records':'Student Records Management','college-registrar':'College Registrar','provost':'Provost','directorate-education-business':'Directorate of Education and Business Studies','directorate-arts-stem':'Directorate of Arts and STEM Studies','examinations':'Examinations Unit','payroll':'Payroll','auditor':"Auditor's Portal",'regional-administrator':'Regional Administrators','coordinator':'Centre Coordinators','quality-assurance':'Quality Assurance Unit','college-finance':'College Finance Officer','admissions':'Admissions Unit','stores':'Stores Unit'};
+unitLabels['registration-officer']='Registration Officer Portal';
 const roleLabels={viewer:'Viewer',officer:'Officer',administrator:'Administrator'};
+const functionalUnitAccess=document.querySelector('#adminForm fieldset');
+if(functionalUnitAccess&&!functionalUnitAccess.querySelector('input[value="registration-officer"]'))functionalUnitAccess.insertAdjacentHTML('beforeend','<label class="check"><input type="checkbox" name="units" value="registration-officer"> Registration Officer Portal</label>');
 const fmt=d=>d?new Date(d).toLocaleString():'Built-in';
 function size(n){n=Number(n||0);if(!n)return '';if(n<1024)return `${n} B`;if(n<1048576)return `${(n/1024).toFixed(1)} KB`;return `${(n/1048576).toFixed(1)} MB`;}
 async function getJson(url,opt){const r=await fetch(url,opt),d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Request failed.');return d;}

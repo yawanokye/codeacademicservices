@@ -1,0 +1,31 @@
+CoDE Academic Services Portal v37.0.0
+Dual registration and assigned-staff resolution lifecycle
+
+1. Direct dual registration
+   - New complaints and service requests are registered at Student Support Services and the category's responsible functional unit at the same time.
+   - One permanent reference, submission, evidence set, audit trail, and student timeline are used throughout.
+   - Sensitive complaints retain their restricted routing rules.
+
+2. Functional-unit reassignment
+   - Student Support and every receiving functional unit may reassign the same case to another permitted unit.
+   - The receiving unit is added to the registration and referral history.
+   - Student Support oversight remains attached to the case.
+   - An unfinished assignment in the sending unit is superseded, and the receiving unit starts unassigned.
+
+3. Administrator assignment by email
+   - Functional-unit administrators may enter a staff name and approved institutional email.
+   - The system creates a personal, time-limited secure link and sends it through the existing Gmail integration when configured.
+   - If delivery is unavailable, the administrator receives the link for secure copying.
+
+4. Red, yellow, and green register states
+   - Red: no current staff assignment, or the assigned staff member has not opened the link.
+   - Yellow: the assigned staff member opened the secure link.
+   - Green: the staff member checked all three resolution confirmations and recorded a clear resolution.
+   - The same current state is shown in Student Support, Functional Units, CSV registers, and Excel registers.
+
+5. Resolution controls and verification
+   - The secure staff workspace shows the student submission and available evidence.
+   - Resolution requires every checkbox plus a resolution note of at least 10 characters.
+   - Automated integration checks cover direct category routing, dual registration, email assignment, red-to-yellow-to-green transitions, permanent-reference reassignment, and receiving-unit visibility.
+
+No new npm dependency is required.

@@ -82,7 +82,7 @@ async function main() {
     assert.equal(publicSupportScript.status, 200, 'support-admin.js must load even when a session expires');
 
     const options = await request('/api/developer/preview-options', { headers:{ authorization:developerAuthorization } }).then(response => response.json());
-    assert.ok(options.staffUnits.length >= 18, 'all configured staff units should be previewable');
+    assert.ok(options.staffUnits.length >= 19, 'all configured staff units should be previewable');
     for (const unit of options.staffUnits) {
       const preview = await developerPost('/api/developer/staff-preview-session', { unit:unit.id });
       await expectPage(preview.data.redirect, preview.cookie, unit.id === 'student-support' ? /Support Services triage/ : /Complaint and request reports/);
@@ -96,9 +96,98 @@ async function main() {
     const dashboard = await expectJson('/api/staff/dashboard', staffPreview.cookie);
     assert.equal(dashboard.overview.total, 3, 'monitoring overview should count visible complaints and requests');
     assert.equal(dashboard.statusStatistics.length, 14, 'every support status should be returned, including zero counts');
-    assert.equal(dashboard.unitStatistics.length, 18, 'every configured functional unit should be returned');
+    assert.equal(dashboard.unitStatistics.length, 19, 'every configured functional unit should be returned');
     assert.equal(dashboard.overview.complaints, 2);
     assert.equal(dashboard.overview.requests, 1);
+
+    const routedReferences = {};
+    const categoryRoutes = [
+      ['deferment','Student Support Services Unit'],
+      ['resumption-deferment','Student Support Services Unit'],
+      ['resumption-rustication','Student Support Services Unit'],
+      ['registration-challenge','Registration Officer Portal']
+    ];
+    for (const [category, expectedOwner] of categoryRoutes) {
+      const routeForm = new FormData();
+      Object.entries({ type:'service-request', category, priority:'normal', name:`Routing Test ${category}`, email:`${category}@example.edu`, studentNumber:`ROUTE-${category}`, studyCentre:'Cape Coast', programme:'Test Programme', studyLevel:'undergraduate', subject:`Routing test for ${category}`, description:`Please verify the configured responsible portal for the ${category} service request.` }).forEach(([key,value]) => routeForm.set(key,value));
+      const routeResponse = await request('/api/support/tickets', { method:'POST', body:routeForm });
+      const routeData = await routeResponse.json();
+      assert.equal(routeResponse.status, 201, routeData.error || `${category} should be accepted`);
+      assert.equal(routeData.ticket.ownerUnit, expectedOwner, `${category} should route to ${expectedOwner}`);
+      routedReferences[category] = routeData.ticket.reference;
+    }
+    const registrationPreview = await developerPost('/api/developer/staff-preview-session', { unit:'registration-officer' });
+    const registrationReferrals = await expectJson('/api/staff/referrals', registrationPreview.cookie);
+    assert.ok(registrationReferrals.referrals.some(item => item.reference === routedReferences['registration-challenge']), 'Registration Officer Portal must receive registration challenges');
+    const supportRoutingQueue = await expectJson('/api/support/admin/tickets', staffPreview.cookie);
+    assert.ok(supportRoutingQueue.tickets.some(item => item.reference === routedReferences.deferment), 'Student Support must receive deferment requests directly');
+    assert.ok(supportRoutingQueue.tickets.some(item => item.reference === routedReferences['resumption-deferment']), 'Student Support must receive resumption-after-deferment requests directly');
+    assert.ok(supportRoutingQueue.tickets.some(item => item.reference === routedReferences['resumption-rustication']), 'Student Support must receive resumption-after-rustication requests directly');
+    assert.ok(supportRoutingQueue.tickets.some(item => item.reference === routedReferences['registration-challenge']), 'Student Support must also monitor registration challenges');
+
+    const submissionForm = new FormData();
+    Object.entries({ type:'service-request', category:'transcript', priority:'normal', name:'Workflow Test Student', email:'workflow.student@example.edu', phone:'0240000001', studentNumber:'WF-001', studyCentre:'Cape Coast', programme:'Test Programme', studyLevel:'undergraduate', subject:'Transcript routing workflow test', description:'Please verify the automatic dual registration and assigned staff resolution workflow.' }).forEach(([key,value]) => submissionForm.set(key,value));
+    const submissionResponse = await request('/api/support/tickets', { method:'POST', body:submissionForm });
+    const submissionData = await submissionResponse.json();
+    assert.equal(submissionResponse.status, 201, submissionData.error || 'workflow ticket should be created');
+    assert.equal(submissionData.ticket.ownerUnit, 'General Office', 'category should route directly to General Office');
+    assert.equal(submissionData.ticket.staffAssignment.colour, 'red', 'new responsible-unit register must start red');
+
+    const generalOfficePreview = await developerPost('/api/developer/staff-preview-session', { unit:'general-office' });
+    const generalOfficeReferrals = await expectJson('/api/staff/referrals', generalOfficePreview.cookie);
+    const workflowTicket = generalOfficeReferrals.referrals.find(item => item.reference === submissionData.ticket.reference);
+    assert.ok(workflowTicket, 'responsible unit must receive the new ticket directly');
+    assert.ok(workflowTicket.registrations.some(item => item.unitId === 'student-support'), 'Student Support must retain a simultaneous oversight registration');
+    assert.ok(workflowTicket.registrations.some(item => item.unitId === 'general-office'), 'responsible unit registration must be recorded');
+
+    const assignmentResponse = await request(`/api/staff/referrals/${workflowTicket.id}/staff-assignments`, { method:'POST', headers:{ cookie:generalOfficePreview.cookie, 'content-type':'application/json' }, body:JSON.stringify({ unitId:'general-office', officerName:'Workflow Officer', officerEmail:'workflow.officer@ucc.edu.gh' }) });
+    const assignmentData = await assignmentResponse.json();
+    assert.equal(assignmentResponse.status, 200, assignmentData.error || 'unit administrator should assign by institutional email');
+    assert.equal(assignmentData.assignment.colour, 'red');
+    const secureAssignmentPath = new URL(assignmentData.secureUrl).pathname;
+    const openedResponse = await request(secureAssignmentPath);
+    assert.equal(openedResponse.status, 200, 'assigned staff secure link should open');
+    assert.match(await openedResponse.text(), /Opened by assigned staff/);
+
+    const supportQueueAfterOpen = await expectJson('/api/support/admin/tickets', staffPreview.cookie);
+    const openedTicket = supportQueueAfterOpen.tickets.find(item => item.reference === workflowTicket.reference);
+    assert.equal(openedTicket.assignment.colour, 'yellow', 'opening the link must turn the shared register yellow');
+
+    const resolutionBody = new URLSearchParams({ reviewed:'yes', actionCompleted:'yes', resolutionRecorded:'yes', resolutionNote:'The responsible unit completed the transcript request and recorded the outcome.' });
+    const resolutionResponse = await request(`${secureAssignmentPath}/resolve`, { method:'POST', headers:{ 'content-type':'application/x-www-form-urlencoded' }, body:resolutionBody });
+    assert.equal(resolutionResponse.status, 200, 'all checked resolution confirmations should complete the assignment');
+    assert.match(await resolutionResponse.text(), /indicator is now green/i);
+    const supportQueueAfterResolution = await expectJson('/api/support/admin/tickets', staffPreview.cookie);
+    const resolvedWorkflowTicket = supportQueueAfterResolution.tickets.find(item => item.reference === workflowTicket.reference);
+    assert.equal(resolvedWorkflowTicket.assignment.colour, 'green', 'resolution must turn every authorised register green');
+    assert.equal(resolvedWorkflowTicket.status, 'resolved');
+    const supportRegisterResponse = await request('/api/support/admin/tickets.csv', { headers:{ cookie:staffPreview.cookie } });
+    const supportRegisterText = await supportRegisterResponse.text();
+    assert.equal(supportRegisterResponse.status, 200);
+    assert.match(supportRegisterText, /Assignment indicator/);
+    assert.match(supportRegisterText, /Resolved by assigned staff/);
+    const unitRegisterResponse = await request('/api/staff/support-register.xlsx', { headers:{ cookie:generalOfficePreview.cookie } });
+    assert.equal(unitRegisterResponse.status, 200, 'functional-unit Excel register should download');
+    assert.match(unitRegisterResponse.headers.get('content-type') || '', /spreadsheetml/);
+
+    const reassignmentForm = new FormData();
+    Object.entries({ type:'complaint', category:'transcript', priority:'high', name:'Reassignment Test Student', email:'reassignment.student@example.edu', studentNumber:'WF-002', studyCentre:'Cape Coast', programme:'Test Programme', studyLevel:'undergraduate', subject:'Reassignment workflow test', description:'Please verify that another functional unit receives the same permanent complaint reference.' }).forEach(([key,value]) => reassignmentForm.set(key,value));
+    const reassignmentSubmission = await request('/api/support/tickets', { method:'POST', body:reassignmentForm });
+    const reassignmentData = await reassignmentSubmission.json();
+    assert.equal(reassignmentSubmission.status, 201, reassignmentData.error || 'reassignment fixture should be created');
+    const refreshedGeneralOffice = await expectJson('/api/staff/referrals', generalOfficePreview.cookie);
+    const ticketToReassign = refreshedGeneralOffice.referrals.find(item => item.reference === reassignmentData.ticket.reference);
+    const reassignResponse = await request(`/api/staff/referrals/${ticketToReassign.id}/reassign`, { method:'POST', headers:{ cookie:generalOfficePreview.cookie, 'content-type':'application/json' }, body:JSON.stringify({ targetUnit:'examinations', note:'Examinations must complete the requested record verification.' }) });
+    const reassignData = await reassignResponse.json();
+    assert.equal(reassignResponse.status, 200, reassignData.error || 'functional unit should reassign the case');
+    assert.equal(reassignData.reference, reassignmentData.ticket.reference, 'reassignment must preserve the permanent reference');
+    const examinationsPreview = await developerPost('/api/developer/staff-preview-session', { unit:'examinations' });
+    const examinationsReferrals = await expectJson('/api/staff/referrals', examinationsPreview.cookie);
+    const reassignedTicket = examinationsReferrals.referrals.find(item => item.reference === reassignData.reference);
+    assert.ok(reassignedTicket, 'receiving functional unit must see the reassigned case');
+    assert.equal(reassignedTicket.assignment.colour, 'red', 'new receiving unit must start with a red unassigned indicator');
+    assert.ok(reassignedTicket.registrations.some(item => item.unitId === 'student-support'), 'Student Support oversight registration must remain after reassignment');
+    assert.ok(reassignedTicket.registrations.some(item => item.unitId === 'examinations'), 'new functional-unit registration must be added');
 
     const previewCases = [
       ['department-administrator','admin','/admin/education',/Find a Project Work student/],
