@@ -335,3 +335,13 @@ Existing administrator accounts also have a **Preview** button in the Developer 
 The Payroll Portal and Auditor Portal now use the full available browser width on desktop. Their approved-claims tables use fixed responsive column proportions, compact spacing and safe wrapping for long references, emails, centre names, notes and status labels. Payroll action buttons are arranged in a compact two-column action grid so the Actions column no longer expands beyond the page. On narrower screens the tables retain horizontal scrolling rather than compressing content to unreadable widths. No payroll, audit, claim-preview or permission logic has changed.
 
 No new Render environment variable or npm dependency is required for v30.
+
+## v14 delivery update: reliable staff previews, complete monitoring, and Project Work student search
+
+- Fixed the Functional Units Staff Portal loading failure caused by Priority 3 report controls being referenced by JavaScript but absent from the page.
+- Developer-opened staff and Student Support portals now show a visible preview banner and redirect cleanly to sign-in if their session expires. Browser scripts remain loadable so an authentication failure can never leave an unexplained loading shell.
+- Monitoring now shows colour-coded totals for complaints, service requests, open, overdue, and resolved cases. It includes every workflow status and a functional-unit matrix with complaint, request, total, and per-status counts. Student Support, Quality Assurance, and Provost monitoring roles receive the full permitted all-unit view. Other staff roles remain restricted to their assigned units.
+- Added a dedicated Project Work student search in Department Administration. Administrators can search by student name, registration/index number, or supervisor/examiner and receive student details, submission status, study centre, supervisor contacts, full submission access, and all related file downloads.
+- Added an automated HTML-to-JavaScript DOM contract check to prevent another portal release with missing required page controls.
+
+No new environment variable or npm dependency is required for this update.

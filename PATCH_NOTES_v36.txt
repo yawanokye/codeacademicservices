@@ -1,0 +1,24 @@
+CoDE Academic Services Portal v36.0.0
+Developer preview and monitoring correction
+
+1. Fixed the Functional Units Staff Portal loading screen
+   - Restored the Priority 3 report controls required by staff.js.
+   - Added a DOM contract check so required HTML controls cannot be omitted unnoticed.
+   - Staff and Student Support browser scripts now load even after session expiry, allowing a clear sign-in redirect instead of an unresponsive page.
+
+2. Improved developer previews
+   - Staff and Student Support workspaces show the active Developer Preview identity and expiry.
+   - Preview integration coverage now checks all 18 staff units and nine department, Payroll, and Auditor role/destination combinations.
+
+3. Expanded Monitoring dashboards
+   - Colour-coded headline totals for complaints, service requests, open, overdue, and resolved cases.
+   - Counts for all 14 workflow statuses, including zero-count statuses.
+   - An all-unit matrix with complaint, request, total, and per-status counts for every configured functional unit.
+   - Student Support, Quality Assurance, and Provost receive the full all-unit view within their confidentiality permissions. Other staff see their assigned units.
+
+4. Added Project Work student search
+   - Search by student name, registration/index number, or supervisor/examiner name.
+   - Results show the student, group, total score, supervisor contacts, submission reference, stream, centre, review status, and submission date.
+   - Each result links to the full submission and its original score sheet, clean score sheet, claim form, report, and completed project-work files when present.
+
+No new environment variables or npm dependencies are required.

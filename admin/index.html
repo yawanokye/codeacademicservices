@@ -21,6 +21,12 @@
 
 <section class="table-card section-accent project-section admin-tab-panel" data-tab-panel="project">
   <div class="section-header"><div><div class="section-kicker">Section 1</div><h2>Undergraduate Project Work</h2><p>Distance and Non-Residential project work are managed in separate tabs.</p></div></div>
+  <section class="project-student-search" aria-labelledby="projectStudentSearchHeading">
+    <div><h3 id="projectStudentSearchHeading">Find a Project Work student</h3><p>Search by student name, index or registration number, or supervisor/examiner name.</p></div>
+    <form id="projectStudentSearchForm"><label class="sr-only" for="projectStudentSearch">Student or supervisor search</label><input id="projectStudentSearch" type="search" minlength="2" placeholder="Name, index number, or supervisor" autocomplete="off"><button id="projectStudentSearchButton" class="btn primary" type="submit">Search students</button><button id="clearProjectStudentSearch" class="btn" type="button">Clear</button></form>
+    <div id="projectStudentSearchStatus" class="project-search-status" role="status" aria-live="polite"></div>
+    <div id="projectStudentSearchResults" class="project-search-results"></div>
+  </section>
   <div class="project-review-legend"><span class="project-review-badge review-pending">Amber · Pending</span><span class="project-review-badge review-approved">Green · Approved</span><span class="project-review-badge review-rejected">Red · Rejected</span><span class="project-review-badge review-returned">Blue · Returned for Correction</span></div>
 
   <nav class="sub-tabs" data-subtab-nav="project"><button class="sub-tab active" type="button" data-subtab-group="project" data-subtab="distance">Distance Project Work</button><button class="sub-tab" type="button" data-subtab-group="project" data-subtab="nonres">Non-Residential Project Work</button></nav>

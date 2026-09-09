@@ -2405,8 +2405,10 @@ const SUPPORT_STATUS_LABELS = Object.freeze({
 });
 app.use('/api/support/admin', supportSameOrigin);
 app.get('/support-admin', supportWorkspaceAuth, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'support-admin.html')));
-app.get('/support-admin.js', supportWorkspaceAuth, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'support-admin.js')));
-app.get('/api/support/admin/me', supportWorkspaceAuth, async (req, res) => res.json({ ok:true, identity:{ name:req.supportIdentity?.name || req.supportIdentity?.username || 'Student Support officer', role:req.supportIdentity?.role || 'viewer', units:normalizeStaffUnits(req.supportIdentity?.units), confidentialAccess:canAccessSensitiveSupport(req.supportIdentity) } }));
+// Browser code contains no protected records. Serving it publicly lets the page
+// report an expired session instead of remaining on an unresponsive loading shell.
+app.get('/support-admin.js', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'support-admin.js')));
+app.get('/api/support/admin/me', supportWorkspaceAuth, async (req, res) => res.json({ ok:true, identity:{ name:req.supportIdentity?.name || req.supportIdentity?.username || 'Student Support officer', role:req.supportIdentity?.role || 'viewer', units:normalizeStaffUnits(req.supportIdentity?.units), confidentialAccess:canAccessSensitiveSupport(req.supportIdentity), developerPreview:Boolean(req.supportIdentity?.developerPreview), developerPreviewLabel:req.supportIdentity?.developerPreviewLabel || '', previewExpiresAt:req.supportIdentity?.previewExpiresAt || null } }));
 app.post('/api/support/admin/lifecycle/refresh', supportWorkspaceAuth, requireSupportRole('officer'), async (_req, res) => {
   await refreshSupportLifecycle();
   res.json({ ok:true, refreshedAt:new Date().toISOString() });
@@ -4485,13 +4487,13 @@ app.post('/api/staff-login',supportRateLimit(15),async(req,res)=>{
   res.json({ok:true,redirect:'/staff'});
 });
 app.get('/staff',staffAuth,(_req,res)=>res.sendFile(path.join(__dirname,'public','staff.html')));
-app.get('/staff.js',staffAuth,(_req,res)=>res.sendFile(path.join(__dirname,'public','staff.js')));
+app.get('/staff.js',(_req,res)=>res.sendFile(path.join(__dirname,'public','staff.js')));
 app.get('/api/staff/me',staffAuth,async(req,res)=>{
   const identity=req.staffIdentity;
   const units=normalizeStaffUnits(identity.units).map(id=>({id,...STAFF_UNITS[id]}));
   const tickets=await readSupportTickets();
   const supportCount=units.some(unit=>unit.id==='student-support')?tickets.filter(ticket=>!['resolved','closed'].includes(ticket.status)).length:0;
-  res.json({ok:true,staff:{name:identity.name||identity.username,username:identity.username,role:identity.role,units,departments:normalizeAdminDepartments(identity.departments),sections:normalizeAdminSections(identity.sections)},metrics:{openSupportTickets:supportCount}});
+  res.json({ok:true,staff:{name:identity.name||identity.username,username:identity.username,role:identity.role,units,departments:normalizeAdminDepartments(identity.departments),sections:normalizeAdminSections(identity.sections),developerPreview:Boolean(identity.developerPreview),developerPreviewLabel:identity.developerPreviewLabel||'',previewExpiresAt:identity.previewExpiresAt||null},metrics:{openSupportTickets:supportCount}});
 });
 function supportDashboardTickets(tickets, unitId) {
   const visible=tickets.filter(ticket=>!ticket.sensitive);
@@ -4632,10 +4634,22 @@ function supportDashboardSummary(tickets, unitId) {
     categoryBreakdown:countBy(tickets,'categoryLabel'), statusBreakdown:countBy(tickets,'status'), centreBreakdown:countBy(tickets,'studyCentre') };
 }
 app.get('/api/staff/dashboard', staffAuth, async(req,res)=>{
-  const permitted=Object.keys(STAFF_UNITS).filter(unit=>!['payroll','auditor','stores'].includes(unit));
+  const allUnits=Object.keys(STAFF_UNITS);
+  const detailedUnits=allUnits.filter(unit=>!['payroll','auditor','stores'].includes(unit));
   const tickets=await readSupportTickets();
-  const dashboards=normalizeStaffUnits(req.staffIdentity?.units).filter(unit=>permitted.includes(unit)).map(unit=>supportDashboardSummary(filterSupportReportTickets(supportDashboardTickets(tickets,unit),req.query),unit));
-  res.json({ok:true,dashboards});
+  const assignedUnits=normalizeStaffUnits(req.staffIdentity?.units);
+  const monitoringAll=assignedUnits.some(unit=>['student-support','quality-assurance','provost'].includes(unit));
+  const visibleTickets=filterSupportReportTickets(supportTicketsForStaffIdentity(tickets,req.staffIdentity),req.query);
+  const dashboardUnits=monitoringAll?allUnits:assignedUnits;
+  const dashboards=assignedUnits.filter(unit=>detailedUnits.includes(unit)).map(unit=>supportDashboardSummary(filterSupportReportTickets(supportDashboardTickets(tickets,unit),req.query),unit));
+  const overview=supportPerformanceMetric(visibleTickets);
+  const statusStatistics=Object.entries(SUPPORT_STATUS_LABELS).map(([id,label])=>({id,label,count:visibleTickets.filter(ticket=>ticket.status===id).length}));
+  const unitStatistics=dashboardUnits.map(unit=>{
+    const items=visibleTickets.filter(ticket=>supportTicketInUnit(ticket,unit));
+    const metric=supportPerformanceMetric(items);
+    return {id:unit,label:STAFF_UNITS[unit].label,total:metric.total,complaints:metric.complaints,requests:metric.requests,statusCounts:Object.fromEntries(Object.keys(SUPPORT_STATUS_LABELS).map(status=>[status,items.filter(ticket=>ticket.status===status).length]))};
+  });
+  res.json({ok:true,overview,statusStatistics,unitStatistics,dashboards});
 });
 app.get('/api/staff/support-report-options', staffAuth, async(req,res)=>{
   const tickets=supportTicketsForStaffIdentity(await readSupportTickets(),req.staffIdentity);
@@ -4818,6 +4832,32 @@ app.get('/api/admin/:department/submissions', departmentAuth, async(req,res)=>{
   const assignments=adminCan(req,'dissertation','viewer')?(await readAssignments()).filter(a=>a.department===req.adminDepartment):[];
   const mapped=adminRecordsMap(records,assignments).filter(r=>adminCan(req,portalSectionForRecord(r),'viewer'));
   res.json(mapped);
+});
+app.get('/api/admin/:department/project-student-search', departmentAuth, requireAdminAccess('project-work','viewer'), async(req,res)=>{
+  const query=String(req.query.q||'').trim();
+  if(query.length<2)return res.status(400).json({error:'Enter at least two characters to search by student, index number, or supervisor.'});
+  const needle=query.toLocaleLowerCase();
+  const records=recordsForDepartment(await readDb(),req.adminDepartment).filter(record=>(record.portalType||'project-work')==='project-work');
+  const results=[];
+  for(const record of records){
+    const supervisorName=record.fullName||'';
+    const supervisorMatch=[supervisorName,record.email,record.reference].some(value=>String(value||'').toLocaleLowerCase().includes(needle));
+    const rows=validScoreRowsWithMeta(record);
+    const matchingRows=supervisorMatch?rows:rows.filter(row=>[row.name,row.registrationNo].some(value=>String(value||'').toLocaleLowerCase().includes(needle)));
+    if(!matchingRows.length&&!supervisorMatch)continue;
+    const files=[];
+    const addFile=(label,kind,item,index)=>{if(!item)return;const suffix=index===undefined?'':`/${index}`;files.push({label,name:item.originalName||label,url:`/api/admin/${encodeURIComponent(req.adminDepartment)}/submissions/${encodeURIComponent(record.id)}/files/${kind}${suffix}`});};
+    addFile('Original score sheet','scoresFile',record.files?.scoresFile);
+    files.push({label:'Clean score sheet',name:`${record.reference}-clean-scores.xlsx`,url:`/api/admin/${encodeURIComponent(req.adminDepartment)}/submissions/${encodeURIComponent(record.id)}/scores.xlsx`});
+    addFile('Claim form','claimForm',record.files?.claimForm);
+    addFile('Project report','reportFile',record.files?.reportFile);
+    const completedWorks=Array.isArray(record.files?.completedWork)?record.files.completedWork:(record.files?.completedWork?[record.files.completedWork]:[]);
+    completedWorks.forEach((file,index)=>addFile(`Completed project work ${index+1}`,'completedWork',file,index));
+    const studentRows=matchingRows.length?matchingRows:[{name:'',registrationNo:'',groupNo:'',totalScore:''}];
+    for(const row of studentRows)results.push({studentName:row.name||'',registrationNo:row.registrationNo||'',groupNo:row.groupNo||'',totalScore:row.totalScore||'',supervisorName,supervisorEmail:record.email||'',supervisorPhone:record.phone||'',submissionId:record.id,reference:record.reference,submittedAt:record.submittedAt,studyCentre:studyCentreDisplay(record),stream:projectStream(record)==='non-residential'?'Non-Residential':'Distance',reviewStatus:projectReviewLabel(projectReviewStatus(record)),files});
+  }
+  results.sort((a,b)=>String(a.studentName||a.registrationNo).localeCompare(String(b.studentName||b.registrationNo),undefined,{numeric:true,sensitivity:'base'}));
+  res.json({ok:true,query,total:results.length,truncated:results.length>200,results:results.slice(0,200)});
 });
 app.post('/api/admin/:department/project-work/:id/review', departmentAuth, requireAdminAccess('project-work','administrator'), async(req,res)=>{
   const status=String(req.body?.status||'').trim().toLowerCase();
