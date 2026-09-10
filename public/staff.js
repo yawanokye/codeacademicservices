@@ -218,7 +218,8 @@
       const response = await fetch(`/api/staff/referrals/${encodeURIComponent(article.dataset.id)}/staff-assignments`, { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'The staff assignment could not be created.');
-      result.innerHTML = `<p class="assignment-link-result">${esc(data.message)} <a href="${esc(data.secureUrl)}" target="_blank" rel="noopener">Open or copy secure link</a></p>`;
+      const activationLink = data.activationUrl ? ` <a href="${esc(data.activationUrl)}" target="_blank" rel="noopener">Open or copy account activation link</a>` : '';
+      result.innerHTML = `<p class="assignment-link-result">${esc(data.message)}${activationLink} <a href="${esc(data.secureUrl)}" target="_blank" rel="noopener">Open or copy assigned-case link</a></p>`;
       show(`Assigned ${data.reference} to ${body.officerEmail}.`, true);
       button.disabled = false;
     } catch (error) { result.textContent = error.message; show(error.message, false); button.disabled = false; }
