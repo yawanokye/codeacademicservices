@@ -1,0 +1,23 @@
+CoDE Academic Services Portal v39
+
+SECURITY AND MOBILE ACCESS
+
+- Added a strict content-security policy, HTTPS transport security on secure requests and existing anti-sniffing, framing, referrer and permissions controls.
+- Staff assignment links now require an authenticated individual staff account.
+- The signed-in institutional email must match the assigned email. A functional-unit administrator retains authorised oversight access.
+- Functional-unit administrators can assign only an active staff account registered to the same email and unit.
+- Complaint details and evidence are not disclosed before authentication.
+- Assignment and evidence responses are excluded from indexing and browser caching.
+- Updated assignment email wording to explain the verified sign-in step.
+- Replaced the incorrect deployment guide with portal-specific Render, custom-domain, Safe Browsing and iPhone verification instructions.
+
+DIRECTORATE MONITORING
+
+- Directorate of Education and Business Studies can monitor all non-confidential complaints and requests.
+- Directorate of Arts and STEM Studies can monitor all non-confidential complaints and requests.
+- Both Directorates receive institution-wide totals, all statuses, all-unit statistics, centre and unit performance, and CSV/Excel downloads like Provost oversight.
+- Restricted sensitive matters remain limited to the Provost and Confidential Case Handler.
+
+REQUIRED OPERATIONAL ACTION
+
+This code hardens the portal but cannot remove an existing browser reputation warning by itself. The site owner must inspect Google Search Console Security issues and request a review after the corrected release is deployed. If Search Console is clear, submit the exact affected URL through Google Safe Browsing's incorrect-warning form.

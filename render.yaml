@@ -9,6 +9,8 @@ services:
         value: 24.14.1
       - key: STORAGE_DIR
         value: /var/data/codeacademicservices
+      - key: PUBLIC_BASE_URL
+        sync: false
       - key: GMAIL_CLIENT_ID
         sync: false
       - key: GMAIL_CLIENT_SECRET
@@ -29,6 +31,10 @@ services:
         value: 100
       - key: SUPPORT_FORWARD_EXPIRY_DAYS
         value: 14
+      - key: SUPPORT_STATUS_TOKEN_SECRET
+        sync: false
+      - key: SUPPORT_ALLOWED_EMAIL_DOMAINS
+        value: ucc.edu.gh
       - key: DEVELOPER_ADMIN_USER
         value: developer
       - key: DEVELOPER_ADMIN_PASSWORD

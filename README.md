@@ -1,3 +1,12 @@
+# v39 update: Secure staff links and Directorate-wide monitoring
+
+- Staff assignment links now require the individual staff account registered to the assigned institutional email and unit.
+- Complaint details and evidence remain hidden until authentication succeeds.
+- Both Directorate monitoring roles receive institution-wide dashboards and downloadable registers for all non-confidential complaints and requests, matching Provost oversight scope except for restricted cases.
+- Production security headers and a portal-specific browser-warning recovery guide are included.
+
+See `PATCH_NOTES_v39.txt` and `DEPLOYMENT.md` before deploying.
+
 # v35 update: Priority 3 service-quality improvements
 
 - A searchable knowledge base now covers frequently requested student services and opens preselected request forms.

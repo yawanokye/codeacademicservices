@@ -1,5 +1,12 @@
 # Changelog
 
+## 39.0.0 secure assignments and Directorate monitoring
+
+- Protected emailed staff assignments with account authentication and email-to-assignment matching.
+- Added production CSP, HSTS, cache prevention and indexing prevention for sensitive assignment pages.
+- Expanded both Directorate dashboards and downloadable reports to all non-confidential complaints and requests.
+- Replaced the unrelated deployment instructions with the correct Render and browser-warning recovery guide.
+
 ## 2.9.0 guided human supervisory review
 
 - Reviews a complete thesis one chapter at a time and pauses after each chapter for an explicit user Continue action.

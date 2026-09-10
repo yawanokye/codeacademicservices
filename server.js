@@ -13,11 +13,16 @@ const { PDFParse } = require('pdf-parse');
 
 const app = express();
 
+app.set('trust proxy', 1);
+
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self' data:; frame-src 'self' blob:");
+  const forwardedProtocol = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  if (req.secure || forwardedProtocol === 'https') res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();
 });
 
@@ -458,7 +463,6 @@ if (!fs.existsSync(PORTAL_SETTINGS_FILE)) fs.writeFileSync(PORTAL_SETTINGS_FILE,
 if (!fs.existsSync(SUPPORT_TICKETS_FILE)) fs.writeFileSync(SUPPORT_TICKETS_FILE, '[]', 'utf8');
 initSupportDatabase();
 
-app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -2683,6 +2687,8 @@ async function createSupportStaffAssignment(req, res, { identity, allowedUnits }
   if (!STAFF_UNITS[unitId] || !units.includes(unitId)) return res.status(403).json({ error:'You may assign staff only for a functional unit you administer.' });
   if (!isEmail(officerEmail)) return res.status(400).json({ error:'Enter a valid staff email address.' });
   if (!supportEmailsAreInstitutional([officerEmail])) return res.status(400).json({ error:'Use an approved institutional staff email address.' });
+  const assignedAccount = (await readAdminUsers()).find(account => account.active !== false && String(account.email || '').trim().toLowerCase() === officerEmail && normalizeStaffUnits(account.units).includes(unitId) && account.passwordHash && account.passwordSalt);
+  if (!assignedAccount) return res.status(409).json({ error:'Create and activate an individual staff account for this email and functional unit before assigning the case. The secure link now requires that account.' });
   const rawToken = crypto.randomBytes(32).toString('hex');
   const assignmentId = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -2718,7 +2724,7 @@ async function createSupportStaffAssignment(req, res, { identity, allowedUnits }
   let emailError = '';
   if (gmailConfigured()) {
     try {
-      const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Complaint or request assigned to you</h2><p>Dear ${htmlEscape(officerName || 'Staff Member')},</p><p>${htmlEscape(STAFF_UNITS[unitId].label)} has assigned the matter below to you.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #c6404d"><strong>Reference:</strong> ${htmlEscape(assignedTicket.reference)}<br><strong>Type:</strong> ${htmlEscape(assignedTicket.type === 'service-request' ? 'Service request' : 'Complaint')}<br><strong>Category:</strong> ${htmlEscape(assignedTicket.categoryLabel)}<br><strong>Subject:</strong> ${htmlEscape(assignedTicket.subject)}</div><p><a href="${htmlEscape(secureUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Open assigned case</a></p><p>The register is currently red. It changes to yellow when you open this secure link and changes to green after you complete the resolution checklist.</p><p>This personal link expires on ${htmlEscape(new Date(expiresAt).toLocaleDateString('en-GB'))}. Do not forward it to another person.</p><p>Regards,<br>${htmlEscape(STAFF_UNITS[unitId].label)}<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+      const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Complaint or request assigned to you</h2><p>Dear ${htmlEscape(officerName || 'Staff Member')},</p><p>${htmlEscape(STAFF_UNITS[unitId].label)} has assigned the matter below to you.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #c6404d"><strong>Reference:</strong> ${htmlEscape(assignedTicket.reference)}<br><strong>Type:</strong> ${htmlEscape(assignedTicket.type === 'service-request' ? 'Service request' : 'Complaint')}<br><strong>Category:</strong> ${htmlEscape(assignedTicket.categoryLabel)}<br><strong>Subject:</strong> ${htmlEscape(assignedTicket.subject)}</div><p><a href="${htmlEscape(secureUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Sign in and open assigned case</a></p><p>You must sign in with the individual institutional staff account registered for this email address. Case details and evidence are hidden until your identity is verified.</p><p>The register is currently red. It changes to yellow after the authorised staff member signs in and opens the case, and changes to green after all resolution checks are completed.</p><p>This personal link expires on ${htmlEscape(new Date(expiresAt).toLocaleDateString('en-GB'))}. Do not forward it to another person.</p><p>Regards,<br>${htmlEscape(STAFF_UNITS[unitId].label)}<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
       await sendGmailHtmlEmail({to:officerEmail,subject:`Assigned support matter - ${assignedTicket.reference}`,html});
       emailStatus = 'sent';
     } catch (error) {
@@ -2932,9 +2938,22 @@ function secureSupportAssignmentPage(ticket, assignment, token, notice = '') {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${htmlEscape(ticket.reference)} Staff Assignment</title><style>:root{--navy:#082b4c;--gold:#d4a72c;--green:#238154;--red:#c6404d;--yellow:#d79a00;--line:#d9e3ea}*{box-sizing:border-box}body{margin:0;background:#f4f7fa;color:#172431;font:16px/1.55 Arial,sans-serif}.wrap{max-width:960px;margin:32px auto;padding:0 18px 50px}.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:24px;box-shadow:0 10px 28px rgba(15,38,61,.08);margin-bottom:18px}h1,h2{color:var(--navy)}h1{font-size:28px;margin:4px 0}.eyebrow{color:#956f00;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.state{display:inline-flex;padding:7px 11px;border-radius:999px;font-weight:800;font-size:14px}.state-red{background:#fde8ea;color:#982b38}.state-yellow{background:#fff1c9;color:#795400}.state-green{background:#def3e7;color:#11683a}.meta{display:grid;grid-template-columns:180px 1fr;gap:8px 14px;padding:15px;background:#f4f8fb;border-radius:9px}.copy{white-space:pre-wrap}.assignment-evidence{display:grid;gap:16px}.assignment-evidence section{display:grid;gap:8px}.assignment-evidence iframe{width:100%;height:430px;border:1px solid var(--line);border-radius:8px}.assignment-evidence a{color:var(--navy);font-weight:800}.resolution-form{display:grid;gap:12px}.resolution-check{display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--line);border-radius:9px}.resolution-check input{width:20px;height:20px;accent-color:var(--green)}textarea{width:100%;min-height:120px;padding:11px;border:1px solid #b9c7d1;border-radius:8px;font:inherit}.button{border:0;border-radius:8px;background:var(--green);color:#fff;padding:12px 17px;font:inherit;font-weight:800;cursor:pointer}.notice{padding:12px 14px;border-left:4px solid var(--green);background:#eaf7ef;color:#145f38;margin-bottom:16px}@media(max-width:650px){.meta{grid-template-columns:1fr}.assignment-evidence iframe{height:320px}}</style></head><body><main class="wrap">${notice?`<div class="notice">${htmlEscape(notice)}</div>`:''}<section class="card"><span class="eyebrow">Assigned staff workspace</span><h1>${htmlEscape(ticket.reference)}</h1><p><span class="state state-${state.colour}">${htmlEscape(state.label)}</span></p><div class="meta"><b>Functional unit</b><span>${htmlEscape(assignment.unitLabel)}</span><b>Assigned staff</b><span>${htmlEscape(assignment.officerName)} · ${htmlEscape(assignment.officerEmail)}</span><b>Type</b><span>${htmlEscape(ticket.type==='service-request'?'Service request':'Complaint')}</span><b>Category</b><span>${htmlEscape(ticket.categoryLabel)}</span><b>Student</b><span>${htmlEscape(ticket.name)} · ${htmlEscape(ticket.studentNumber||'Number not stated')}</span><b>Study centre</b><span>${htmlEscape(ticket.studyCentre||'Not stated')}</span><b>Subject</b><span>${htmlEscape(ticket.subject)}</span></div><h2>Student submission</h2><p class="copy">${htmlEscape(ticket.description)}</p></section><section class="card"><h2>Student evidence</h2>${framedEvidence(ticket.evidence,'evidence','No student evidence was attached.')}<h2>Officer evidence</h2>${framedEvidence(ticket.officerEvidence,'officer-evidence','No officer evidence has been added.')}</section><section class="card"><h2>${resolved?'Resolution completed':'Complete this assignment'}</h2>${resolved?`<p><strong>Resolved:</strong> ${htmlEscape(new Date(assignment.resolvedAt).toLocaleString('en-GB'))}</p><p class="copy">${htmlEscape(assignment.resolutionNote)}</p>`:`<p>All three confirmations and a clear resolution note are required. Completing this form changes the assignment indicator from yellow to green in every authorised register.</p><form class="resolution-form" method="post" action="/secure/support-assignment/${encodeURIComponent(token)}/resolve">${checklist}<label><strong>Resolution provided to the student and oversight units</strong><textarea name="resolutionNote" minlength="10" maxlength="4000" required></textarea></label><button class="button" type="submit">Mark complaint or request resolved</button></form>`}</section></main></body></html>`;
 }
 
-app.get('/secure/support-assignment/:token', async(req,res)=>{
-  const match=supportAssignmentForToken(await readSupportTickets(),req.params.token);
-  if(!match||match.assignment.state==='superseded')return res.status(404).send('This staff assignment link is unavailable.');
+async function secureSupportAssignmentAuth(req, res, next) {
+  return staffAuth(req, res, async () => {
+    const match = supportAssignmentForToken(await readSupportTickets(), req.params.token);
+    if (!match || match.assignment.state === 'superseded') return res.status(404).send('This staff assignment link is unavailable.');
+    const identity = req.staffIdentity || {};
+    const accountEmail = String(identity.email || '').trim().toLowerCase();
+    const assignedEmail = String(match.assignment.officerEmail || '').trim().toLowerCase();
+    const unitAdministrator = identity.role === 'administrator' && normalizeStaffUnits(identity.units).includes(match.assignment.unitId);
+    if (!accountEmail || (accountEmail !== assignedEmail && !unitAdministrator)) return res.status(403).send('This assignment belongs to another staff account. Sign out and use the institutional account named in the assignment email.');
+    req.supportAssignmentMatch = match;
+    return next();
+  });
+}
+
+app.get('/secure/support-assignment/:token', secureSupportAssignmentAuth, async(req,res)=>{
+  const match=req.supportAssignmentMatch;
   if(new Date(match.assignment.expiresAt).getTime()<=Date.now()&&match.assignment.state!=='resolved')return res.status(410).send('This staff assignment link has expired. Ask the functional-unit administrator to assign the case again.');
   if(match.assignment.state==='unopened'){
     const now=new Date().toISOString();
@@ -2942,9 +2961,10 @@ app.get('/secure/support-assignment/:token', async(req,res)=>{
     match.assignment.state='opened';match.assignment.openedAt=now;
   }
   res.setHeader('Cache-Control','no-store');
+  res.setHeader('X-Robots-Tag','noindex, nofollow, noarchive');
   return res.send(secureSupportAssignmentPage(match.ticket,match.assignment,req.params.token));
 });
-app.post('/secure/support-assignment/:token/resolve', supportSameOrigin, async(req,res)=>{
+app.post('/secure/support-assignment/:token/resolve', secureSupportAssignmentAuth, supportSameOrigin, async(req,res)=>{
   const checks=Object.fromEntries(SUPPORT_ASSIGNMENT_CHECKS.map(item=>[item.id,String(req.body?.[item.id]||'')==='yes']));
   const resolutionNote=String(req.body?.resolutionNote||'').trim().slice(0,4000);
   if(Object.values(checks).some(value=>!value)||resolutionNote.length<10)return res.status(400).send('Complete all resolution checkboxes and provide a clear resolution note of at least 10 characters.');
@@ -2959,14 +2979,14 @@ app.post('/secure/support-assignment/:token/resolve', supportSameOrigin, async(r
   res.setHeader('Cache-Control','no-store');
   return res.send(secureSupportAssignmentPage(updated,assignment,req.params.token,'Resolution recorded. The assignment indicator is now green in every authorised register.'));
 });
-app.get('/secure/support-assignment/:token/:collection/:index', async(req,res)=>{
-  const match=supportAssignmentForToken(await readSupportTickets(),req.params.token);
-  if(!match||match.assignment.state==='superseded')return res.status(404).send('This staff assignment link is unavailable.');
+app.get('/secure/support-assignment/:token/:collection/:index', secureSupportAssignmentAuth, async(req,res)=>{
+  const match=req.supportAssignmentMatch;
   if(new Date(match.assignment.expiresAt).getTime()<=Date.now()&&match.assignment.state!=='resolved')return res.status(410).send('This staff assignment link has expired.');
   const collection=req.params.collection==='officer-evidence'?'officerEvidence':req.params.collection==='evidence'?'evidence':'';
   if(!collection)return res.status(404).send('Evidence file not found.');
   const evidence=supportEvidenceFor(match.ticket,req.params.index,collection);
   if(!evidence)return res.status(404).send('Evidence file not found.');
+  res.setHeader('X-Robots-Tag','noindex, nofollow, noarchive');
   return sendSupportEvidence(req,res,evidence);
 });
 
@@ -4702,7 +4722,7 @@ function supportDashboardTickets(tickets, unitId) {
   if(unitId==='student-support'||unitId==='quality-assurance') return visible;
   if(unitId==='college-registrar') return visible.filter(ticket=>['certificate','change-of-name','transcript','incomplete-result','deferment','resumption-deferment','resumption-rustication','registration-challenge'].includes(ticket.categoryKey));
   if(unitId==='college-finance') return visible.filter(ticket=>ticket.categoryKey==='fees-payment');
-  if(['directorate-education-business','directorate-arts-stem'].includes(unitId)) return visible.filter(ticket=>['programme-department','assessment-project'].includes(ticket.categoryKey));
+  if(['directorate-education-business','directorate-arts-stem'].includes(unitId)) return visible;
   if(unitId==='coordinator') return visible.filter(ticket=>ticket.originRole==='centre-coordinator');
   if(unitId==='regional-administrator') return visible.filter(ticket=>ticket.originRole==='centre-coordinator'||(ticket.referrals||[]).some(referral=>referral.targetUnit===unitId));
   return visible.filter(ticket=>ticket.ownerUnitId===unitId||(ticket.referrals||[]).some(referral=>referral.targetUnit===unitId));
@@ -4839,7 +4859,7 @@ app.get('/api/staff/dashboard', staffAuth, async(req,res)=>{
   const detailedUnits=allUnits.filter(unit=>!['payroll','auditor','stores'].includes(unit));
   const tickets=await readSupportTickets();
   const assignedUnits=normalizeStaffUnits(req.staffIdentity?.units);
-  const monitoringAll=assignedUnits.some(unit=>['student-support','quality-assurance','provost'].includes(unit));
+  const monitoringAll=assignedUnits.some(unit=>['student-support','quality-assurance','provost','directorate-education-business','directorate-arts-stem'].includes(unit));
   const visibleTickets=filterSupportReportTickets(supportTicketsForStaffIdentity(tickets,req.staffIdentity),req.query);
   const dashboardUnits=monitoringAll?allUnits:assignedUnits;
   const dashboards=assignedUnits.filter(unit=>detailedUnits.includes(unit)).map(unit=>supportDashboardSummary(filterSupportReportTickets(supportDashboardTickets(tickets,unit),req.query),unit));

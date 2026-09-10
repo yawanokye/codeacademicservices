@@ -5,6 +5,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 
 const root = path.resolve(__dirname, '..');
@@ -62,9 +63,17 @@ async function main() {
     fixtureTicket({ id:'two', reference:'SUP-TWO', type:'service-request', status:'in-progress', unit:'examinations', unitLabel:'Examinations Unit' }),
     fixtureTicket({ id:'three', reference:'SUP-THREE', type:'complaint', status:'closed', unit:'admissions', unitLabel:'Admissions Unit' })
   ];
+  const workflowPassword = 'workflow-test-password';
+  const workflowSalt = crypto.randomBytes(16).toString('hex');
+  const staffAccounts = [{
+    id:'workflow-officer', name:'Workflow Officer', username:'workflow.officer', email:'workflow.officer@ucc.edu.gh',
+    role:'officer', units:['general-office'], departments:[], sections:[], active:true,
+    passwordSalt:workflowSalt, passwordHash:crypto.scryptSync(workflowPassword,workflowSalt,64).toString('hex'), passwordSetAt:new Date().toISOString()
+  }];
   await Promise.all([
     fsp.writeFile(path.join(dataDir, 'submissions.json'), JSON.stringify(submissions)),
-    fsp.writeFile(path.join(dataDir, 'support-tickets.json'), JSON.stringify(tickets))
+    fsp.writeFile(path.join(dataDir, 'support-tickets.json'), JSON.stringify(tickets)),
+    fsp.writeFile(path.join(dataDir, 'admin-users.json'), JSON.stringify(staffAccounts))
   ]);
 
   const child = spawn(process.execPath, ['server.js'], { cwd:root, env:{ ...process.env, PORT:String(port), STORAGE_DIR:storage, DEVELOPER_ADMIN_USER:developerUser, DEVELOPER_ADMIN_PASSWORD:developerPassword, SUPPORT_STATUS_TOKEN_SECRET:'independent-test-secret' }, stdio:['ignore','pipe','pipe'] });
@@ -80,6 +89,9 @@ async function main() {
     assert.equal(publicStaffScript.status, 200, 'staff.js must load even when a session expires');
     const publicSupportScript = await request('/support-admin.js');
     assert.equal(publicSupportScript.status, 200, 'support-admin.js must load even when a session expires');
+    const secureHeaderResponse = await request('/', { headers:{ 'x-forwarded-proto':'https' } });
+    assert.match(secureHeaderResponse.headers.get('content-security-policy') || '', /default-src 'self'/, 'production responses should include a content-security policy');
+    assert.match(secureHeaderResponse.headers.get('strict-transport-security') || '', /max-age=31536000/, 'HTTPS responses should require transport security');
 
     const options = await request('/api/developer/preview-options', { headers:{ authorization:developerAuthorization } }).then(response => response.json());
     assert.ok(options.staffUnits.length >= 19, 'all configured staff units should be previewable');
@@ -99,6 +111,12 @@ async function main() {
     assert.equal(dashboard.unitStatistics.length, 19, 'every configured functional unit should be returned');
     assert.equal(dashboard.overview.complaints, 2);
     assert.equal(dashboard.overview.requests, 1);
+    for (const directorate of ['directorate-education-business','directorate-arts-stem']) {
+      const directoratePreview = await developerPost('/api/developer/staff-preview-session', { unit:directorate });
+      const directorateDashboard = await expectJson('/api/staff/dashboard', directoratePreview.cookie);
+      assert.equal(directorateDashboard.overview.total, 3, `${directorate} should monitor every non-confidential complaint and request`);
+      assert.equal(directorateDashboard.unitStatistics.length, 19, `${directorate} should receive the all-unit monitoring matrix`);
+    }
 
     const routedReferences = {};
     const categoryRoutes = [
@@ -145,8 +163,15 @@ async function main() {
     assert.equal(assignmentResponse.status, 200, assignmentData.error || 'unit administrator should assign by institutional email');
     assert.equal(assignmentData.assignment.colour, 'red');
     const secureAssignmentPath = new URL(assignmentData.secureUrl).pathname;
-    const openedResponse = await request(secureAssignmentPath);
+    const blockedAssignment = await request(secureAssignmentPath, { redirect:'manual', headers:{ accept:'text/html' } });
+    assert.equal(blockedAssignment.status, 302, 'assignment must require staff authentication before showing case data');
+    assert.match(blockedAssignment.headers.get('location') || '', /^\/staff-login\.html\?next=/);
+    const staffLoginResponse = await request('/api/staff-login', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ username:'workflow.officer', password:workflowPassword }) });
+    assert.equal(staffLoginResponse.status, 200, 'assigned staff account should sign in');
+    const workflowOfficerCookie = sessionCookie(staffLoginResponse);
+    const openedResponse = await request(secureAssignmentPath, { headers:{ cookie:workflowOfficerCookie, accept:'text/html' } });
     assert.equal(openedResponse.status, 200, 'assigned staff secure link should open');
+    assert.match(openedResponse.headers.get('x-robots-tag') || '', /noindex/, 'assignment pages must be excluded from indexing');
     assert.match(await openedResponse.text(), /Opened by assigned staff/);
 
     const supportQueueAfterOpen = await expectJson('/api/support/admin/tickets', staffPreview.cookie);
@@ -154,7 +179,7 @@ async function main() {
     assert.equal(openedTicket.assignment.colour, 'yellow', 'opening the link must turn the shared register yellow');
 
     const resolutionBody = new URLSearchParams({ reviewed:'yes', actionCompleted:'yes', resolutionRecorded:'yes', resolutionNote:'The responsible unit completed the transcript request and recorded the outcome.' });
-    const resolutionResponse = await request(`${secureAssignmentPath}/resolve`, { method:'POST', headers:{ 'content-type':'application/x-www-form-urlencoded' }, body:resolutionBody });
+    const resolutionResponse = await request(`${secureAssignmentPath}/resolve`, { method:'POST', headers:{ cookie:workflowOfficerCookie, 'content-type':'application/x-www-form-urlencoded' }, body:resolutionBody });
     assert.equal(resolutionResponse.status, 200, 'all checked resolution confirmations should complete the assignment');
     assert.match(await resolutionResponse.text(), /indicator is now green/i);
     const supportQueueAfterResolution = await expectJson('/api/support/admin/tickets', staffPreview.cookie);
