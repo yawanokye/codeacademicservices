@@ -1,5 +1,12 @@
 # Changelog
 
+## 40.0.0 automatic staff account activation
+
+- Creates a permanent Officer account automatically when a complaint or request is first assigned to a new institutional email.
+- Sends one activation-and-assignment email without a temporary password.
+- Signs the staff member in after password creation and opens the assigned case directly.
+- Reuses active accounts for later assignments and blocks automatic reactivation of suspended accounts.
+
 ## 39.0.0 secure assignments and Directorate monitoring
 
 - Protected emailed staff assignments with account authentication and email-to-assignment matching.

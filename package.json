@@ -1,6 +1,6 @@
 {
   "name": "codeacademicservices",
-  "version": "39.0.0",
+  "version": "40.0.0",
   "private": true,
   "description": "Codeacademicservices, the CoDE Academic Services Portal for submissions, claims, student support and centre coordination",
   "main": "server.js",

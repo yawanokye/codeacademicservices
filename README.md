@@ -1,3 +1,12 @@
+# v40 update: Automatic permanent account on first assignment
+
+- Assigning a case to a new institutional email now creates a pending permanent Officer account automatically.
+- One email lets the staff member choose a password and then opens the assigned case directly.
+- No temporary password is emailed. Existing active accounts are reused for later assignments.
+- Suspended accounts require deliberate reactivation in the Developer Portal.
+
+See `PATCH_NOTES_v40.txt` for the complete workflow.
+
 # v39 update: Secure staff links and Directorate-wide monitoring
 
 - Staff assignment links now require the individual staff account registered to the assigned institutional email and unit.

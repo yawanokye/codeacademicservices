@@ -1,0 +1,20 @@
+CoDE Academic Services Portal v40
+
+AUTOMATIC PERMANENT STAFF ACCOUNTS
+
+- The first assignment to a valid institutional email automatically creates a permanent Officer account for the selected functional unit.
+- No temporary password is generated or sent by email.
+- The first assignment email contains one time-limited activation button, the username and the complaint or request reference.
+- The staff member chooses a password, is signed in automatically and is redirected directly to the assigned case.
+- The assignment remains red until the authorised staff member opens the case, then turns yellow. It turns green after the resolution checklist is completed.
+- Later assignments reuse the same permanent account without sending another activation request.
+- If an existing account does not yet include the selected functional unit, the assigning unit administrator can add that unit through the assignment action. Viewer access is raised to Officer because resolution actions require operational access.
+- Suspended accounts are never reactivated automatically. The Developer Portal must reactivate them deliberately.
+- When email delivery is unavailable, the authorised administrator receives a copyable activation link so the staff member can still complete first-time setup securely.
+- Account creation, unit additions, staff assignment, opening and resolution remain auditable.
+
+SECURITY
+
+- Activation links expire according to `ADMIN_INVITATION_EXPIRY_HOURS`, which defaults to 24 hours.
+- Assignment links remain protected by the staff login and assigned-email verification introduced in v39.
+- The activation redirect accepts only a valid local staff-assignment path.

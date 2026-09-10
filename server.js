@@ -583,6 +583,62 @@ function newAdminInvitation() {
     expiresAt:new Date(Date.now()+ADMIN_INVITATION_EXPIRY_HOURS*60*60*1000).toISOString()
   };
 }
+function safeSupportAssignmentNext(value) {
+  const next = String(value || '').trim();
+  return /^\/secure\/support-assignment\/[a-f0-9]{64}$/i.test(next) ? next : '';
+}
+function uniqueStaffUsername(email, accounts) {
+  const base = String(email || '').trim().toLowerCase();
+  const used = new Set(accounts.map(account => String(account.username || '').trim().toLowerCase()));
+  if (!used.has(base)) return base;
+  let suffix = 2;
+  while (used.has(`${base}-${suffix}`)) suffix += 1;
+  return `${base}-${suffix}`;
+}
+async function ensureSupportAssignmentAccount({ email, name, unitId, actor }) {
+  let result = null;
+  await mutateAdminUsers(accounts => {
+    let account = accounts.find(item => String(item.email || '').trim().toLowerCase() === email);
+    if (account?.active === false) {
+      result = { state:'disabled', account:publicAdminUser(account) };
+      return result;
+    }
+    let created = false;
+    let unitAdded = false;
+    if (!account) {
+      const invitation = newAdminInvitation();
+      account = {
+        id:crypto.randomUUID(), name:name || email.split('@')[0], email,
+        username:uniqueStaffUsername(email, accounts), role:'officer', departments:[], sections:[], units:[unitId],
+        active:true, createdAt:new Date().toISOString(), createdFrom:'support-assignment', createdBy:actor,
+        invitationTokenHash:invitation.tokenHash, invitationExpiresAt:invitation.expiresAt, invitationEmailStatus:'pending'
+      };
+      accounts.push(account);
+      result = { state:'pending', created:true, unitAdded:true, invitationToken:invitation.token, account:{...account} };
+      return result;
+    }
+    account.units = normalizeStaffUnits(account.units);
+    if (!account.units.includes(unitId)) {
+      account.units.push(unitId);
+      unitAdded = true;
+    }
+    if ((ROLE_RANK[account.role] || 0) < ROLE_RANK.officer) account.role = 'officer';
+    account.accessHistory = Array.isArray(account.accessHistory) ? account.accessHistory : [];
+    if (unitAdded) account.accessHistory.push({ action:'functional-unit-added', unitId, at:new Date().toISOString(), by:actor, reason:'First assignment for this functional unit' });
+    if (account.passwordHash && account.passwordSalt) {
+      result = { state:'active', created, unitAdded, invitationToken:null, account:{...account} };
+      return result;
+    }
+    const invitation = newAdminInvitation();
+    account.invitationTokenHash = invitation.tokenHash;
+    account.invitationExpiresAt = invitation.expiresAt;
+    account.invitationEmailStatus = 'pending';
+    account.invitationLastError = null;
+    result = { state:'pending', created, unitAdded, invitationToken:invitation.token, account:{...account} };
+    return result;
+  });
+  return result;
+}
 function requestBaseUrl(req) {
   if (PUBLIC_BASE_URL) return PUBLIC_BASE_URL;
   const forwarded=String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
@@ -2687,13 +2743,16 @@ async function createSupportStaffAssignment(req, res, { identity, allowedUnits }
   if (!STAFF_UNITS[unitId] || !units.includes(unitId)) return res.status(403).json({ error:'You may assign staff only for a functional unit you administer.' });
   if (!isEmail(officerEmail)) return res.status(400).json({ error:'Enter a valid staff email address.' });
   if (!supportEmailsAreInstitutional([officerEmail])) return res.status(400).json({ error:'Use an approved institutional staff email address.' });
-  const assignedAccount = (await readAdminUsers()).find(account => account.active !== false && String(account.email || '').trim().toLowerCase() === officerEmail && normalizeStaffUnits(account.units).includes(unitId) && account.passwordHash && account.passwordSalt);
-  if (!assignedAccount) return res.status(409).json({ error:'Create and activate an individual staff account for this email and functional unit before assigning the case. The secure link now requires that account.' });
+  const availableTicket = (await readSupportTickets()).find(ticket => ticket.id === req.params.id && (ticket.ownerUnitId === unitId || activeReferralForUnits(ticket,[unitId])));
+  if (!availableTicket) return res.status(404).json({ error:'This complaint or request is not registered with the selected functional unit.' });
+  if (availableTicket.sensitive && !['confidential-handler','provost'].includes(unitId)) return res.status(403).json({ error:'This restricted complaint cannot be assigned through the selected functional unit.' });
+  const actor = identity?.name || identity?.username || 'Functional-unit administrator';
+  const accountSetup = await ensureSupportAssignmentAccount({ email:officerEmail, name:officerName, unitId, actor });
+  if (!accountSetup || accountSetup.state === 'disabled') return res.status(409).json({ error:'This staff account is suspended. Reactivate it in the Developer Portal before assigning a complaint or request.' });
   const rawToken = crypto.randomBytes(32).toString('hex');
   const assignmentId = crypto.randomUUID();
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.now() + SUPPORT_FORWARD_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  const actor = identity?.name || identity?.username || 'Functional-unit administrator';
   let assignedTicket = null;
   await mutateSupportTickets(tickets => {
     const ticket = tickets.find(item => item.id === req.params.id);
@@ -2707,7 +2766,7 @@ async function createSupportStaffAssignment(req, res, { identity, allowedUnits }
         assignment.supersededBy = actor;
       }
     }
-    ticket.staffAssignments.push({ id:assignmentId, unitId, unitLabel:STAFF_UNITS[unitId].label, officerName:officerName || officerEmail.split('@')[0], officerEmail, assignedBy:actor, assignedAt:now, expiresAt, tokenHash:hashOneTimeToken(rawToken), state:'unopened', emailStatus:'pending', checks:{}, openedAt:null, resolvedAt:null, resolutionNote:'' });
+    ticket.staffAssignments.push({ id:assignmentId, unitId, unitLabel:STAFF_UNITS[unitId].label, officerName:officerName || accountSetup.account.name || officerEmail.split('@')[0], officerEmail, staffAccountId:accountSetup.account.id, accountCreated:Boolean(accountSetup.created), activationRequired:accountSetup.state==='pending', assignedBy:actor, assignedAt:now, expiresAt, tokenHash:hashOneTimeToken(rawToken), state:'unopened', emailStatus:'pending', checks:{}, openedAt:null, resolvedAt:null, resolutionNote:'' });
     ticket.assignedCaseOwner = officerName || officerEmail;
     ticket.assignedCaseEmail = officerEmail;
     ticket.assignmentDueAt = supportMoveWorkingDays(now, 2);
@@ -2720,12 +2779,18 @@ async function createSupportStaffAssignment(req, res, { identity, allowedUnits }
   });
   if (!assignedTicket) return res.status(404).json({ error:'This complaint or request is not registered with the selected functional unit.' });
   const secureUrl = `${baseUrlFor(req)}/secure/support-assignment/${rawToken}`;
+  const activationUrl = accountSetup.invitationToken ? `${requestBaseUrl(req)}/admin-set-password.html?token=${encodeURIComponent(accountSetup.invitationToken)}&next=${encodeURIComponent(new URL(secureUrl).pathname)}` : '';
   let emailStatus = 'not-configured';
   let emailError = '';
   if (gmailConfigured()) {
     try {
-      const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Complaint or request assigned to you</h2><p>Dear ${htmlEscape(officerName || 'Staff Member')},</p><p>${htmlEscape(STAFF_UNITS[unitId].label)} has assigned the matter below to you.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #c6404d"><strong>Reference:</strong> ${htmlEscape(assignedTicket.reference)}<br><strong>Type:</strong> ${htmlEscape(assignedTicket.type === 'service-request' ? 'Service request' : 'Complaint')}<br><strong>Category:</strong> ${htmlEscape(assignedTicket.categoryLabel)}<br><strong>Subject:</strong> ${htmlEscape(assignedTicket.subject)}</div><p><a href="${htmlEscape(secureUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Sign in and open assigned case</a></p><p>You must sign in with the individual institutional staff account registered for this email address. Case details and evidence are hidden until your identity is verified.</p><p>The register is currently red. It changes to yellow after the authorised staff member signs in and opens the case, and changes to green after all resolution checks are completed.</p><p>This personal link expires on ${htmlEscape(new Date(expiresAt).toLocaleDateString('en-GB'))}. Do not forward it to another person.</p><p>Regards,<br>${htmlEscape(STAFF_UNITS[unitId].label)}<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
-      await sendGmailHtmlEmail({to:officerEmail,subject:`Assigned support matter - ${assignedTicket.reference}`,html});
+      const actionUrl = activationUrl || secureUrl;
+      const actionLabel = activationUrl ? 'Activate account and open assigned case' : 'Sign in and open assigned case';
+      const accountText = activationUrl
+        ? `A permanent Officer account has ${accountSetup.created ? 'been created' : 'not yet been activated'} for ${htmlEscape(officerEmail)}. Use the one-time button below to choose your password. After activation, the assigned case opens automatically.`
+        : `Your existing permanent staff account for ${htmlEscape(officerEmail)} has been linked to this assignment. Sign in with that account to open the case.`;
+      const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><div style="font-size:12px;text-transform:uppercase;color:#956f00;font-weight:bold">University of Cape Coast</div><h2 style="color:#082b4c">Complaint or request assigned to you</h2><p>Dear ${htmlEscape(officerName || accountSetup.account.name || 'Staff Member')},</p><p>${htmlEscape(STAFF_UNITS[unitId].label)} has assigned the matter below to you.</p><div style="margin:18px 0;padding:16px;background:#f5f8fb;border-left:4px solid #c6404d"><strong>Reference:</strong> ${htmlEscape(assignedTicket.reference)}<br><strong>Type:</strong> ${htmlEscape(assignedTicket.type === 'service-request' ? 'Service request' : 'Complaint')}<br><strong>Category:</strong> ${htmlEscape(assignedTicket.categoryLabel)}<br><strong>Subject:</strong> ${htmlEscape(assignedTicket.subject)}</div><p>${accountText}</p><p><a href="${htmlEscape(actionUrl)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">${actionLabel}</a></p><p>Username: <strong>${htmlEscape(accountSetup.account.username)}</strong></p><p>No temporary password is sent by email. ${activationUrl ? `The activation link expires on ${htmlEscape(new Date(accountSetup.account.invitationExpiresAt).toLocaleString('en-GB'))}.` : ''}</p><p>The register is red until the authorised staff member opens the case, yellow while it is being handled, and green after all resolution checks are completed.</p><p>The case-assignment link expires on ${htmlEscape(new Date(expiresAt).toLocaleDateString('en-GB'))}. Do not forward this email.</p><p>Regards,<br>${htmlEscape(STAFF_UNITS[unitId].label)}<br>College of Distance Education<br>University of Cape Coast</p></div></body></html>`;
+      await sendGmailHtmlEmail({to:officerEmail,subject:`${activationUrl ? 'Activate account and open' : 'Assigned'} support matter - ${assignedTicket.reference}`,html});
       emailStatus = 'sent';
     } catch (error) {
       emailStatus = 'failed';
@@ -2737,8 +2802,21 @@ async function createSupportStaffAssignment(req, res, { identity, allowedUnits }
     if (assignment) { assignment.emailStatus = emailStatus; assignment.emailSentAt = emailStatus === 'sent' ? new Date().toISOString() : null; assignment.emailError = emailError; }
     return tickets;
   });
+  if (accountSetup.state === 'pending') {
+    await mutateAdminUsers(accounts => {
+      const account = accounts.find(item => item.id === accountSetup.account.id);
+      if (account) {
+        account.invitationEmailStatus = emailStatus === 'sent' ? 'sent' : emailStatus;
+        account.invitationSentAt = emailStatus === 'sent' ? new Date().toISOString() : null;
+        account.invitationLastError = emailError;
+      }
+      return account || null;
+    });
+  }
   const assignment = supportAssignmentSummary({ staffAssignments:assignedTicket.staffAssignments }, [unitId]);
-  return res.json({ ok:true, reference:assignedTicket.reference, assignment:{...assignment,emailStatus}, secureUrl, message:emailStatus==='sent'?'The staff assignment email was sent.':emailStatus==='failed'?'The assignment was registered, but email delivery failed. Copy the secure link or correct the email settings and assign again.':'The assignment was registered. Email delivery is not configured, so copy the secure link to the assigned staff member.' });
+  const accountMessage = accountSetup.created ? 'A permanent Officer account was created automatically.' : accountSetup.unitAdded ? 'The functional unit was added to the existing permanent account.' : accountSetup.state === 'pending' ? 'The existing pending account received a new activation link.' : 'The existing permanent staff account was reused.';
+  const deliveryMessage = emailStatus === 'sent' ? 'The activation or assignment email was sent.' : emailStatus === 'failed' ? 'Email delivery failed. Copy the activation link below or correct the email settings and assign again.' : 'Email delivery is not configured. Copy the activation link below to the staff member.';
+  return res.json({ ok:true, reference:assignedTicket.reference, assignment:{...assignment,emailStatus}, secureUrl, activationUrl:activationUrl && emailStatus!=='sent' ? activationUrl : '', account:{ id:accountSetup.account.id, username:accountSetup.account.username, email:officerEmail, created:Boolean(accountSetup.created), unitAdded:Boolean(accountSetup.unitAdded), activationRequired:accountSetup.state==='pending' }, message:`${accountMessage} ${deliveryMessage}` });
 }
 
 app.post('/api/support/admin/tickets/:id/staff-assignments', supportWorkspaceAuth, requireSupportRole('administrator'), async(req,res)=>{
@@ -4497,7 +4575,7 @@ app.get('/api/admin-invitation/:token', async(req,res)=>{
   res.json({ok:true,name:a.name||a.username,username:a.username,email:a.email||'',role:a.role||'viewer',departments:(a.departments||[]).map(slug=>({slug,name:departmentFromSlug(slug)?.name||slug})),units:normalizeStaffUnits(a.units).map(slug=>({slug,name:STAFF_UNITS[slug].label})),sections:a.sections||[],expiresAt:a.invitationExpiresAt,passwordAlreadySet:Boolean(a.passwordHash),loginUrls:adminLoginLinks(a.departments||[],baseUrl,a.units||[])});
 });
 app.post('/api/admin-invitation/:token/set-password', async(req,res)=>{
-  const token=String(req.params.token||''),password=String(req.body?.password||''),confirmPassword=String(req.body?.confirmPassword||'');
+  const token=String(req.params.token||''),password=String(req.body?.password||''),confirmPassword=String(req.body?.confirmPassword||''),next=safeSupportAssignmentNext(req.body?.next);
   if(!/^[a-f0-9]{64}$/i.test(token))return res.status(400).json({error:'This password setup link is invalid.'});
   if(password.length<10)return res.status(400).json({error:'Choose a password containing at least 10 characters.'});
   if(password!==confirmPassword)return res.status(400).json({error:'The password confirmation does not match.'});
@@ -4505,7 +4583,11 @@ app.post('/api/admin-invitation/:token/set-password', async(req,res)=>{
   await mutateAdminUsers(list=>{const a=list.find(x=>x.invitationTokenHash===tokenHash);if(!a){error='This password setup link is invalid or has already been used.';return null;}if(a.active===false){error='This administrator account is disabled.';return null;}if(!a.invitationExpiresAt||new Date(a.invitationExpiresAt).getTime()<=Date.now()){error='This password setup link has expired. Ask the portal developer to send a new link.';return null;}const pw=hashPassword(password);a.passwordSalt=pw.salt;a.passwordHash=pw.hash;a.passwordSetAt=new Date().toISOString();a.invitationAcceptedAt=a.passwordSetAt;delete a.invitationTokenHash;delete a.invitationExpiresAt;a.invitationEmailStatus='accepted';a.invitationLastError=null;updated={...a};return updated;});
   if(error)return res.status(error.includes('expired')?410:400).json({error});
   const baseUrl=requestBaseUrl(req);
-  res.json({ok:true,message:'Your staff password has been set successfully.',user:publicAdminUser(updated),loginUrls:adminLoginLinks(updated.departments||[],baseUrl,updated.units||[])});
+  if(next && normalizeStaffUnits(updated.units).length){
+    const sessionToken=createAdminSession({...publicAdminUser(updated),master:false},'__staff__');
+    res.cookie('ucc_admin_session',sessionToken,{httpOnly:true,secure:req.secure||String(req.headers['x-forwarded-proto']||'').includes('https'),sameSite:'lax',maxAge:ADMIN_SESSION_TTL_MS,path:'/'});
+  }
+  res.json({ok:true,message:'Your staff password has been set successfully.',user:publicAdminUser(updated),loginUrls:adminLoginLinks(updated.departments||[],baseUrl,updated.units||[]),redirect:next||null});
 });
 
 // DEPARTMENT ADMIN: dissertation assignment by secure emailed link

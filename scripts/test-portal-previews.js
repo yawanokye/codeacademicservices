@@ -5,7 +5,6 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
-const crypto = require('crypto');
 const { spawn } = require('child_process');
 
 const root = path.resolve(__dirname, '..');
@@ -64,19 +63,13 @@ async function main() {
     fixtureTicket({ id:'three', reference:'SUP-THREE', type:'complaint', status:'closed', unit:'admissions', unitLabel:'Admissions Unit' })
   ];
   const workflowPassword = 'workflow-test-password';
-  const workflowSalt = crypto.randomBytes(16).toString('hex');
-  const staffAccounts = [{
-    id:'workflow-officer', name:'Workflow Officer', username:'workflow.officer', email:'workflow.officer@ucc.edu.gh',
-    role:'officer', units:['general-office'], departments:[], sections:[], active:true,
-    passwordSalt:workflowSalt, passwordHash:crypto.scryptSync(workflowPassword,workflowSalt,64).toString('hex'), passwordSetAt:new Date().toISOString()
-  }];
   await Promise.all([
     fsp.writeFile(path.join(dataDir, 'submissions.json'), JSON.stringify(submissions)),
     fsp.writeFile(path.join(dataDir, 'support-tickets.json'), JSON.stringify(tickets)),
-    fsp.writeFile(path.join(dataDir, 'admin-users.json'), JSON.stringify(staffAccounts))
+    fsp.writeFile(path.join(dataDir, 'admin-users.json'), '[]')
   ]);
 
-  const child = spawn(process.execPath, ['server.js'], { cwd:root, env:{ ...process.env, PORT:String(port), STORAGE_DIR:storage, DEVELOPER_ADMIN_USER:developerUser, DEVELOPER_ADMIN_PASSWORD:developerPassword, SUPPORT_STATUS_TOKEN_SECRET:'independent-test-secret' }, stdio:['ignore','pipe','pipe'] });
+  const child = spawn(process.execPath, ['server.js'], { cwd:root, env:{ ...process.env, PORT:String(port), STORAGE_DIR:storage, DEVELOPER_ADMIN_USER:developerUser, DEVELOPER_ADMIN_PASSWORD:developerPassword, SUPPORT_STATUS_TOKEN_SECRET:'independent-test-secret', GMAIL_CLIENT_ID:'', GMAIL_CLIENT_SECRET:'', GMAIL_REFRESH_TOKEN:'', GMAIL_SENDER_EMAIL:'' }, stdio:['ignore','pipe','pipe'] });
   let output = '';
   child.stdout.on('data', chunk => { output += chunk; });
   child.stderr.on('data', chunk => { output += chunk; });
@@ -162,13 +155,20 @@ async function main() {
     const assignmentData = await assignmentResponse.json();
     assert.equal(assignmentResponse.status, 200, assignmentData.error || 'unit administrator should assign by institutional email');
     assert.equal(assignmentData.assignment.colour, 'red');
+    assert.equal(assignmentData.account.created, true, 'first assignment should create a permanent staff account automatically');
+    assert.equal(assignmentData.account.activationRequired, true, 'new staff account should require one-time activation');
+    assert.ok(assignmentData.activationUrl, 'activation link should be returned when test email delivery is not configured');
     const secureAssignmentPath = new URL(assignmentData.secureUrl).pathname;
     const blockedAssignment = await request(secureAssignmentPath, { redirect:'manual', headers:{ accept:'text/html' } });
     assert.equal(blockedAssignment.status, 302, 'assignment must require staff authentication before showing case data');
     assert.match(blockedAssignment.headers.get('location') || '', /^\/staff-login\.html\?next=/);
-    const staffLoginResponse = await request('/api/staff-login', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ username:'workflow.officer', password:workflowPassword }) });
-    assert.equal(staffLoginResponse.status, 200, 'assigned staff account should sign in');
-    const workflowOfficerCookie = sessionCookie(staffLoginResponse);
+    const activationToken = new URL(assignmentData.activationUrl).searchParams.get('token');
+    assert.ok(activationToken, 'automatic account should receive a one-time activation token');
+    const activationResponse = await request(`/api/admin-invitation/${activationToken}/set-password`, { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ password:workflowPassword, confirmPassword:workflowPassword, next:secureAssignmentPath }) });
+    const activationData = await activationResponse.json();
+    assert.equal(activationResponse.status, 200, activationData.error || 'assigned staff should activate the permanent account');
+    assert.equal(activationData.redirect, secureAssignmentPath, 'first activation should return directly to the assigned case');
+    const workflowOfficerCookie = sessionCookie(activationResponse);
     const openedResponse = await request(secureAssignmentPath, { headers:{ cookie:workflowOfficerCookie, accept:'text/html' } });
     assert.equal(openedResponse.status, 200, 'assigned staff secure link should open');
     assert.match(openedResponse.headers.get('x-robots-tag') || '', /noindex/, 'assignment pages must be excluded from indexing');
@@ -202,6 +202,11 @@ async function main() {
     assert.equal(reassignmentSubmission.status, 201, reassignmentData.error || 'reassignment fixture should be created');
     const refreshedGeneralOffice = await expectJson('/api/staff/referrals', generalOfficePreview.cookie);
     const ticketToReassign = refreshedGeneralOffice.referrals.find(item => item.reference === reassignmentData.ticket.reference);
+    const reusedAssignmentResponse = await request(`/api/staff/referrals/${ticketToReassign.id}/staff-assignments`, { method:'POST', headers:{ cookie:generalOfficePreview.cookie, 'content-type':'application/json' }, body:JSON.stringify({ unitId:'general-office', officerName:'Workflow Officer', officerEmail:'workflow.officer@ucc.edu.gh' }) });
+    const reusedAssignmentData = await reusedAssignmentResponse.json();
+    assert.equal(reusedAssignmentResponse.status, 200, reusedAssignmentData.error || 'existing permanent account should be reusable');
+    assert.equal(reusedAssignmentData.account.created, false, 'later assignments must reuse the existing staff account');
+    assert.equal(reusedAssignmentData.account.activationRequired, false, 'an activated account must not receive another activation workflow');
     const reassignResponse = await request(`/api/staff/referrals/${ticketToReassign.id}/reassign`, { method:'POST', headers:{ cookie:generalOfficePreview.cookie, 'content-type':'application/json' }, body:JSON.stringify({ targetUnit:'examinations', note:'Examinations must complete the requested record verification.' }) });
     const reassignData = await reassignResponse.json();
     assert.equal(reassignResponse.status, 200, reassignData.error || 'functional unit should reassign the case');

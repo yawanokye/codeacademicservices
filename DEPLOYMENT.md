@@ -56,10 +56,13 @@ Use an institution-controlled HTTPS hostname, ideally a University of Cape Coast
 
 ## Staff assignment security
 
-Version 39 no longer reveals a complaint, student details or evidence merely because someone possesses an assignment URL.
+Version 40 no longer reveals a complaint, student details or evidence merely because someone possesses an assignment URL.
 
-- The functional-unit administrator must first create and activate an individual staff account with the same institutional email and unit.
-- Opening the emailed assignment link redirects an unauthenticated person to the staff login.
+- The first assignment to a new institutional email creates a pending permanent Officer account for that functional unit automatically.
+- One email contains the account-activation action and the assigned complaint or request reference. No temporary password is sent.
+- After the staff member chooses a password, the system signs them in and opens the assigned case directly.
+- Later assignments reuse the same permanent account.
+- Opening an assignment link without a valid session redirects the person to staff login.
 - The signed-in account email must match the assigned email. A unit administrator can open the link for authorised oversight.
 - The indicator becomes yellow only after authorised access. It becomes green only after the resolution checklist and note are submitted.
 - Assignment and evidence pages send `no-store` and `noindex` controls.
@@ -82,7 +85,10 @@ After deployment:
 
 1. Confirm `/health` returns a successful response.
 2. Confirm the homepage, student support, staff login and developer portal load on Chrome and Safari.
-3. Assign a test case to an activated institutional staff account.
-4. Confirm the link requires sign-in, rejects another staff account and shows no case data before authentication.
-5. Confirm the assignment changes red to yellow after authorised opening and green after resolution.
-6. Sign in as each Directorate role and confirm the overview and downloadable register include complaints from every functional unit while restricted cases stay hidden.
+3. Assign a test case to an institutional email that does not yet have an account.
+4. Confirm one permanent Officer account is created and the email contains an activation action without a temporary password.
+5. Set the password and confirm the staff member is signed in and redirected directly to the assigned case.
+6. Confirm another staff account is rejected and no case data appears before authentication.
+7. Confirm the assignment changes red to yellow after authorised opening and green after resolution.
+8. Assign another case to the same email and confirm the existing account is reused.
+9. Sign in as each Directorate role and confirm the overview and downloadable register include complaints from every functional unit while restricted cases stay hidden.
