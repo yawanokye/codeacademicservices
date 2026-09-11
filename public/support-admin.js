@@ -41,6 +41,20 @@
     element.className = `status show ${ok ? 'ok' : 'bad'}`;
     element.scrollIntoView({ behavior:'smooth', block:'nearest' });
   }
+  async function apiResponse(response, fallback) {
+    requireAuthentication(response);
+    const raw = await response.text();
+    let data = {};
+    if (raw) {
+      try { data = JSON.parse(raw); }
+      catch { data = { error:response.ok ? '' : fallback }; }
+    }
+    if (!response.ok) {
+      const reason = data.error || data.reason || data.message || fallback;
+      throw new Error(String(reason || fallback));
+    }
+    return data;
+  }
   function selectOptions(items, selected, blankLabel) {
     return `<option value="">${esc(blankLabel)}</option>${items.map(item => `<option value="${esc(item.id)}" ${item.id === selected ? 'selected' : ''}>${esc(item.label)}</option>`).join('')}`;
   }
@@ -54,9 +68,23 @@
     const item = assignment || { colour:'red', label:'Not assigned to staff' };
     return `<span class="assignment-badge assignment-${esc(item.colour || 'red')}">${esc(item.label || 'Not assigned to staff')}</span>`;
   }
+  function assignmentNarrative(ticket) {
+    const assignment = ticket.assignment || {};
+    const decision = ticket.finalDecision || null;
+    const narrative = decision?.narrative || assignment.resolutionNote || (['resolved','final-decision','closed','accepted'].includes(ticket.status) ? ticket.resolution : '') || '';
+    const transitions = assignment.stateHistory || [];
+    const transitionList = transitions.length ? `<ol class="colour-history">${transitions.map(item => `<li><span class="assignment-badge assignment-${esc(item.colour || 'red')}">${esc(item.label || item.colour)}</span><span>${esc(date(item.at))}${item.by ? ` · ${esc(item.by)}` : ''}</span>${item.narrative ? `<p>${esc(item.narrative)}</p>` : ''}</li>`).join('')}</ol>` : '<p>No earlier colour transition is recorded for this legacy case.</p>';
+    const decisionBlock = narrative ? `<div class="decision-narrative"><strong>${esc(decision?.label || 'Resolution narrative')}</strong><p>${esc(narrative)}</p><small>${esc(date(decision?.at || assignment.resolvedAt))}${decision?.unitLabel ? ` · ${esc(decision.unitLabel)}` : ''}${decision?.by ? ` · ${esc(decision.by)}` : ''}</small></div>` : '<p>No final narrative has been recorded yet.</p>';
+    return `<details class="assignment-status-detail"><summary>${assignmentBadge(assignment)}<span>View colour history and narrative</span></summary><div class="assignment-status-content">${decisionBlock}<h5>Colour history</h5>${transitionList}</div></details>`;
+  }
   function assignmentHistory(ticket) {
     if (!ticket.assignments?.length) return '<p class="admin-ticket-empty">No staff assignment has been created.</p>';
-    return `<ul class="assignment-history">${ticket.assignments.slice().reverse().map(item => `<li>${assignmentBadge(item.state)}<span><strong>${esc(item.unitLabel)}</strong> · ${esc(item.officerName || item.officerEmail)}</span><small>Assigned ${esc(date(item.assignedAt))}${item.openedAt ? ` · Opened ${esc(date(item.openedAt))}` : ''}${item.resolvedAt ? ` · Resolved ${esc(date(item.resolvedAt))}` : ''}</small></li>`).join('')}</ul>`;
+    return `<ul class="assignment-history">${ticket.assignments.slice().reverse().map(item => `<li>${assignmentBadge(item.state)}<span><strong>${esc(item.unitLabel)}</strong> · ${esc(item.officerName || item.officerEmail)}</span><small>Assigned ${esc(date(item.assignedAt))}${item.openedAt ? ` · Opened ${esc(date(item.openedAt))}` : ''}${item.resolvedAt ? ` · Resolved ${esc(date(item.resolvedAt))}` : ''}${item.supersededAt ? ` · Redirected ${esc(date(item.supersededAt))}` : ''}</small>${item.resolutionNote ? `<details class="assignment-history-narrative"><summary>View recorded narrative</summary><p>${esc(item.resolutionNote)}</p></details>` : ''}</li>`).join('')}</ul>`;
+  }
+  function routingNotice(ticket) {
+    const route = ticket.routingState || {};
+    if (route.key !== 'redirected') return '';
+    return `<section class="routing-notice"><strong>This case was redirected to ${esc(route.redirectedToLabel || 'another functional unit')}.</strong><span>${esc(date(route.redirectedAt))}${route.redirectedBy ? ` · ${esc(route.redirectedBy)}` : ''}</span><p>${esc(route.narrative || 'The receiving unit now has operational responsibility. This record remains here for the audit trail.')}</p></section>`;
   }
   function evidence(ticket, files, collection) {
     if (!files?.length) return '<p class="admin-ticket-empty">No files attached.</p>';
@@ -76,7 +104,8 @@
   }
   function ticketCard(ticket) {
     const canEdit = identity.role !== 'viewer';
-    const canAssign = identity.role === 'administrator';
+    const caseCompleted = ['resolved','final-decision','closed','accepted'].includes(ticket.status);
+    const canAssign = identity.role === 'administrator' && !caseCompleted;
     const categories = selectOptions(configuration.categories, ticket.categoryKey, 'Keep current category');
     const routingUnits = selectOptions(configuration.units, '', 'Select functional unit');
     const assignableUnits = configuration.units.filter(item => (identity.units || []).includes(item.id));
@@ -88,7 +117,9 @@
       <div class="ticket-body">
         <div class="admin-ticket-meta"><span><strong>Status</strong>${esc(ticket.statusLabel)}</span><span><strong>Student</strong>${esc(ticket.email)}</span><span><strong>Study centre</strong>${esc(ticket.studyCentre || 'Not stated')}</span><span><strong>Programme</strong>${esc(ticket.programme || 'Not stated')}</span><span><strong>Resolution target</strong>${esc(date(ticket.dueAt))}</span><span><strong>Staff assignment</strong>${assignmentBadge(ticket.assignment)}</span><span><strong>Assigned officer</strong>${esc(ticket.assignment?.officerName || ticket.assignedCaseOwner || 'Unassigned')}</span><span><strong>Student feedback</strong>${ticket.feedback ? `${esc(ticket.feedback.rating)}/5 · ${esc(ticket.feedback.resolved)}` : 'Not submitted'}</span><span><strong>Assistance language</strong>${esc(({en:'English',tw:'Twi',fr:'French'})[ticket.language] || ticket.language || 'English')}</span><span><strong>Notifications</strong>${esc(ticket.notificationPreference || 'email')}</span></div>
         <p class="admin-ticket-description">${esc(ticket.description)}</p>
-        <section class="staff-assignment-panel"><div><h4>Staff email assignment</h4><p>Red means not opened. Yellow means the staff member opened the secure link. Green means all resolution checks were completed.</p></div>${canAssign ? `<form class="staff-assignment-form"><label>Functional unit<select name="unitId" required>${assignmentUnits}</select></label><label>Staff name<input name="officerName" placeholder="Staff member's name"></label><label>Institutional email<input name="officerEmail" type="email" placeholder="name@ucc.edu.gh" required></label><button class="btn" type="submit">Assign and send link</button></form><div class="assignment-result" aria-live="polite"></div>` : '<p class="staff-restricted">Only an administrator for the functional unit may assign a staff member.</p>'}${assignmentHistory(ticket)}</section>
+        ${routingNotice(ticket)}
+        ${assignmentNarrative(ticket)}
+        <section class="staff-assignment-panel"><div><h4>Staff email assignment</h4><p>Red means not opened. Yellow means the staff member opened the secure link. Green means all resolution checks were completed.</p></div>${canAssign ? `<form class="staff-assignment-form"><label>Functional unit<select name="unitId" required>${assignmentUnits}</select></label><label>First name<input name="officerFirstName" autocomplete="given-name" required></label><label>Middle name <small>(optional)</small><input name="officerMiddleName" autocomplete="additional-name"></label><label>Surname<input name="officerLastName" autocomplete="family-name" required></label><label>Institutional email<input name="officerEmail" type="email" placeholder="name@ucc.edu.gh" required></label><button class="btn" type="submit">Assign and send link</button></form><div class="assignment-result" aria-live="polite"></div>` : `<p class="staff-restricted">${caseCompleted ? 'This case has a completed decision. Reopen or reassign it before creating another staff assignment.' : 'Only an administrator for the functional unit may assign a staff member.'}</p>`}${assignmentHistory(ticket)}</section>
         ${ticket.feedback ? `<section class="feedback-detail"><h4>Student satisfaction survey</h4><div class="feedback-score-grid"><span><strong>${esc(ticket.feedback.rating)}/5</strong>Overall</span><span><strong>${esc(ticket.feedback.easeOfUse ?? '—')}/5</strong>Ease</span><span><strong>${esc(ticket.feedback.communication ?? '—')}/5</strong>Communication</span><span><strong>${esc(ticket.feedback.timeliness ?? '—')}/5</strong>Timeliness</span><span><strong>${esc(ticket.feedback.staffCourtesy ?? '—')}/5</strong>Courtesy</span></div><p><strong>Resolved:</strong> ${esc(ticket.feedback.resolved)} · <strong>Notifications helpful:</strong> ${esc(ticket.feedback.notificationHelpful || 'not recorded')} · <strong>Language assistance:</strong> ${esc(ticket.feedback.languageHelp || 'not recorded')}</p><p>${esc(ticket.feedback.comment || 'No additional comment.')}</p><small>${esc(date(ticket.feedback.submittedAt))}</small></section>` : ''}
         <div class="ticket-two-column"><section class="evidence-panel"><h4>Student evidence</h4>${evidence(ticket, ticket.evidence, 'evidence')}</section><section class="evidence-panel"><h4>Officer evidence</h4>${evidence(ticket, ticket.officerEvidence, 'officer-evidence')}${canEdit ? `<form class="officer-evidence-form" enctype="multipart/form-data"><label>Files<input name="evidenceFiles" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.webp,.txt"></label><label>Evidence note<input name="note" placeholder="Source and relevance"></label><button class="btn secondary" type="submit">Attach</button></form>` : ''}</section></div>
         ${canEdit ? `<section class="case-update-panel"><h4>Classify and update</h4><p>Use the staff email assignment panel above to assign an officer, and use Reassign below to change the responsible unit without losing history.</p><div class="case-controls"><label>Category<select class="ticket-category">${categories}</select></label><label>Priority<select class="ticket-priority-key"><option value="low" ${ticket.priorityKey === 'low' ? 'selected' : ''}>Low</option><option value="normal" ${ticket.priorityKey === 'normal' ? 'selected' : ''}>Normal</option><option value="high" ${ticket.priorityKey === 'high' ? 'selected' : ''}>High</option><option value="urgent" ${ticket.priorityKey === 'urgent' ? 'selected' : ''}>Urgent</option></select></label><label>Case status<select class="ticket-status">${statuses}</select></label><label>Response template<select class="update-template"><option value="">Write a custom update</option><option value="evidence">Request missing evidence</option><option value="investigation">Investigation underway</option><option value="delay">Delay and escalation notice</option><option value="resolution">Resolution ready</option></select></label><label class="wide">Student-facing update<textarea class="ticket-note" placeholder="Required for evidence requests, investigation updates and decisions"></textarea></label><button class="btn save-ticket" type="button">Save and notify</button></div></section>` : '<p class="staff-restricted">Your viewer role is read-only.</p>'}
@@ -116,8 +147,7 @@
   }
   async function request(article, suffix, options, success) {
     const response = await fetch(`/api/support/admin/tickets/${encodeURIComponent(article.dataset.id)}${suffix}`, options);
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || 'The action could not be completed.');
+    const data = await apiResponse(response, 'The action could not be completed.');
     show(success(data), true);
     await load();
   }
@@ -143,13 +173,12 @@
     try {
       const body = Object.fromEntries(new FormData(event.currentTarget));
       const response = await fetch(`/api/support/admin/tickets/${encodeURIComponent(article.dataset.id)}/staff-assignments`, { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || 'The staff assignment could not be created.');
+      const data = await apiResponse(response, 'The staff assignment could not be created.');
       const activationLink = data.activationUrl ? ` <a href="${esc(data.activationUrl)}" target="_blank" rel="noopener">Open or copy account activation link</a>` : '';
       result.innerHTML = `<p class="assignment-link-result">${esc(data.message)}${activationLink} <a href="${esc(data.secureUrl)}" target="_blank" rel="noopener">Open or copy assigned-case link</a></p>`;
       show(`Assigned ${data.reference} to ${body.officerEmail}.`, true);
       button.disabled = false;
-    } catch (error) { result.textContent = error.message; show(error.message, false); button.disabled = false; }
+    } catch (error) { result.innerHTML = `<p class="assignment-error-result"><strong>Assignment not completed.</strong> ${esc(error.message)}</p>`; show(error.message, false); button.disabled = false; }
   }
   async function sendUnitMessage(event) {
     const article = event.currentTarget.closest('.admin-ticket');

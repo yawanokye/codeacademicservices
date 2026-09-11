@@ -14,7 +14,8 @@ async function submitForm(form, endpoint, statusEl, submitBtn){
     const destination=data.departmentName?` Destination: ${data.departmentName}.`:'';
     const validation=data.titleValidated?' Dissertation title validated against the uploaded work.':'';
     const review=data.reviewStatusLabel?` Status: ${data.reviewStatusLabel}. Scores will enter consolidated outputs only after departmental approval.`:'';
-    setStatus(statusEl,true,`Submission received successfully. Reference: ${data.reference}.${destination}${validation}${review}`);
+    const certification=data.claimantCertificationStatus?` Claim certification: ${data.claimantCertificationStatus}. ${data.certificationEmailSent?'Open the verification link sent to your email.':'If the verification email was not delivered, ask the department to resend it.'}`:'';
+    setStatus(statusEl,true,`Submission received successfully. Reference: ${data.reference}.${destination}${validation}${review}${certification}`);
     form.reset();
     return data;
   }catch(err){

@@ -34,6 +34,20 @@
     element.className = `status show ${ok ? 'ok' : 'bad'}`;
     element.scrollIntoView({ behavior:'smooth', block:'nearest' });
   }
+  async function apiResponse(response, fallback) {
+    requireAuthentication(response);
+    const raw = await response.text();
+    let data = {};
+    if (raw) {
+      try { data = JSON.parse(raw); }
+      catch { data = { error:response.ok ? '' : fallback }; }
+    }
+    if (!response.ok) {
+      const reason = data.error || data.reason || data.message || fallback;
+      throw new Error(String(reason || fallback));
+    }
+    return data;
+  }
   function unitOptions() {
     return `<option value="">Select functional unit</option>${Object.entries(functionalUnits).map(([id, label]) => `<option value="${id}">${esc(label)}</option>`).join('')}`;
   }
@@ -91,9 +105,32 @@
     const item = assignment || { colour:'red', label:'Not assigned to staff' };
     return `<span class="assignment-badge assignment-${esc(item.colour || 'red')}">${esc(item.label || 'Not assigned to staff')}</span>`;
   }
+  function ticketIndicator(ticket) {
+    const route = ticket.routingState || {};
+    return route.key === 'redirected'
+      ? assignmentBadge({ colour:'blue', label:route.label || 'Case redirected' })
+      : assignmentBadge(ticket.assignment);
+  }
+  function assignmentNarrative(ticket) {
+    const route = ticket.routingState || {};
+    const historical = route.key === 'redirected' ? (ticket.assignments || []).slice().reverse().find(item => item.unitId === route.unitId) : null;
+    const assignment = historical ? { ...historical, ...(historical.state || {}), colour:'blue', label:route.label || 'Case redirected' } : (ticket.assignment || {});
+    const decision = ticket.finalDecision || null;
+    const narrative = decision?.narrative || assignment.resolutionNote || (['resolved','final-decision','closed','accepted'].includes(ticket.status) ? ticket.resolution : '') || '';
+    const transitions = assignment.stateHistory || [];
+    const transitionList = transitions.length ? `<ol class="colour-history">${transitions.map(item => `<li><span class="assignment-badge assignment-${esc(item.colour || 'red')}">${esc(item.label || item.colour)}</span><span>${esc(date(item.at))}${item.by ? ` · ${esc(item.by)}` : ''}</span>${item.narrative ? `<p>${esc(item.narrative)}</p>` : ''}</li>`).join('')}</ol>` : '<p>No earlier colour transition is recorded for this legacy case.</p>';
+    const routeBlock = route.key === 'redirected' ? `<div class="decision-narrative routing"><strong>Redirection narrative</strong><p>${esc(route.narrative || `Operational responsibility moved to ${route.redirectedToLabel || 'another unit'}.`)}</p><small>${esc(date(route.redirectedAt))}${route.redirectedBy ? ` · ${esc(route.redirectedBy)}` : ''}</small></div>` : '';
+    const decisionBlock = narrative ? `<div class="decision-narrative"><strong>${esc(decision?.label || 'Resolution narrative')}</strong><p>${esc(narrative)}</p><small>${esc(date(decision?.at || assignment.resolvedAt))}${decision?.unitLabel ? ` · ${esc(decision.unitLabel)}` : ''}${decision?.by ? ` · ${esc(decision.by)}` : ''}</small></div>` : '<p>No final narrative has been recorded yet.</p>';
+    return `<details class="assignment-status-detail"><summary>${ticketIndicator(ticket)}<span>View colour history and narrative</span></summary><div class="assignment-status-content">${routeBlock}${decisionBlock}<h5>Colour history</h5>${transitionList}</div></details>`;
+  }
   function assignmentHistory(ticket) {
     if (!ticket.assignments?.length) return '<p class="admin-ticket-empty">No staff assignment has been created.</p>';
-    return `<ul class="assignment-history">${ticket.assignments.slice().reverse().map(item => `<li>${assignmentBadge(item.state)}<span><strong>${esc(item.unitLabel)}</strong> · ${esc(item.officerName || item.officerEmail)}</span><small>Assigned ${esc(date(item.assignedAt))}${item.openedAt ? ` · Opened ${esc(date(item.openedAt))}` : ''}${item.resolvedAt ? ` · Resolved ${esc(date(item.resolvedAt))}` : ''}</small></li>`).join('')}</ul>`;
+    return `<ul class="assignment-history">${ticket.assignments.slice().reverse().map(item => `<li>${assignmentBadge(item.state)}<span><strong>${esc(item.unitLabel)}</strong> · ${esc(item.officerName || item.officerEmail)}</span><small>Assigned ${esc(date(item.assignedAt))}${item.openedAt ? ` · Opened ${esc(date(item.openedAt))}` : ''}${item.resolvedAt ? ` · Resolved ${esc(date(item.resolvedAt))}` : ''}${item.supersededAt ? ` · Redirected ${esc(date(item.supersededAt))}` : ''}</small>${item.resolutionNote ? `<details class="assignment-history-narrative"><summary>View recorded narrative</summary><p>${esc(item.resolutionNote)}</p></details>` : ''}</li>`).join('')}</ul>`;
+  }
+  function routingNotice(ticket) {
+    const route = ticket.routingState || {};
+    if (route.key !== 'redirected') return '';
+    return `<section class="routing-notice"><strong>This case was redirected to ${esc(route.redirectedToLabel || 'another functional unit')}.</strong><span>${esc(date(route.redirectedAt))}${route.redirectedBy ? ` · ${esc(route.redirectedBy)}` : ''}</span><p>${esc(route.narrative || 'The receiving unit now has operational responsibility. This record remains in your register for the audit trail.')}</p></section>`;
   }
   function referralCard(ticket, staff) {
     const canEdit = staff.role !== 'viewer' && ticket.activeUnitIds?.length > 0 && !['resolved','final-decision','closed','accepted'].includes(ticket.status);
@@ -104,10 +141,12 @@
     const activeUnits = staff.units.filter(unit => ticket.activeUnitIds?.includes(unit.id));
     const preferredUnit = activeUnits.some(unit => unit.id === ticket.assignment?.unitId) ? ticket.assignment.unitId : (activeUnits[0]?.id || '');
     const assignmentUnits = activeUnits.map(unit => `<option value="${esc(unit.id)}" ${unit.id === preferredUnit ? 'selected' : ''}>${esc(unit.label)}</option>`).join('');
-    return `<details class="admin-ticket staff-referral-card" data-id="${esc(ticket.id)}"><summary class="admin-ticket-summary"><span><span class="ticket-ref">${esc(ticket.reference)}</span><strong>${esc(ticket.subject)}</strong><small>${esc(ticket.name)} · ${esc(ticket.category)} · ${esc(ticket.ownerUnit)}</small></span><span class="ticket-summary-badges">${assignmentBadge(ticket.assignment)}${sensitive}${slaBadge(ticket)}<span class="ticket-priority">${esc(ticket.priority)}</span></span></summary><div class="ticket-body">
-      <div class="admin-ticket-meta"><span><strong>Status</strong>${esc(ticket.statusLabel)}</span><span><strong>Student</strong>${esc(ticket.email)}</span><span><strong>Study centre</strong>${esc(ticket.studyCentre || 'Not stated')}</span><span><strong>Staff assignment</strong>${assignmentBadge(ticket.assignment)}</span><span><strong>Assigned officer</strong>${esc(ticket.assignment?.officerName || ticket.assignedCaseOwner || 'Unassigned')}</span><span><strong>Resolution target</strong>${esc(date(ticket.dueAt))}</span><span><strong>Survey</strong>${ticket.feedback?`${esc(ticket.feedback.rating)}/5 overall`:'Not submitted'}</span><span><strong>Assistance language</strong>${esc(({en:'English',tw:'Twi',fr:'French'})[ticket.language]||'English')}</span><span><strong>Notifications</strong>${esc(({'email':'Email only','email-sms':'Email and SMS','email-whatsapp':'Email and WhatsApp'})[ticket.notificationPreference]||'Email only')}</span></div>
+    return `<details class="admin-ticket staff-referral-card" data-id="${esc(ticket.id)}"><summary class="admin-ticket-summary"><span><span class="ticket-ref">${esc(ticket.reference)}</span><strong>${esc(ticket.subject)}</strong><small>${esc(ticket.name)} · ${esc(ticket.category)} · ${esc(ticket.ownerUnit)}</small></span><span class="ticket-summary-badges">${ticketIndicator(ticket)}${sensitive}${slaBadge(ticket)}<span class="ticket-priority">${esc(ticket.priority)}</span></span></summary><div class="ticket-body">
+      <div class="admin-ticket-meta"><span><strong>Status</strong>${esc(ticket.statusLabel)}</span><span><strong>Student</strong>${esc(ticket.email)}</span><span><strong>Study centre</strong>${esc(ticket.studyCentre || 'Not stated')}</span><span><strong>Staff assignment</strong>${ticketIndicator(ticket)}</span><span><strong>Assigned officer</strong>${esc(ticket.assignment?.officerName || ticket.assignedCaseOwner || 'Unassigned')}</span><span><strong>Resolution target</strong>${esc(date(ticket.dueAt))}</span><span><strong>Survey</strong>${ticket.feedback?`${esc(ticket.feedback.rating)}/5 overall`:'Not submitted'}</span><span><strong>Assistance language</strong>${esc(({en:'English',tw:'Twi',fr:'French'})[ticket.language]||'English')}</span><span><strong>Notifications</strong>${esc(({'email':'Email only','email-sms':'Email and SMS','email-whatsapp':'Email and WhatsApp'})[ticket.notificationPreference]||'Email only')}</span></div>
       <p class="admin-ticket-description">${esc(ticket.description)}</p>
-      <section class="staff-assignment-panel"><div><h4>Staff email assignment</h4><p>Red means not opened. Yellow means the staff member opened the secure link. Green means all resolution checks were completed.</p></div>${canAssign ? `<form class="staff-assignment-form"><label>Functional unit<select name="unitId" required>${assignmentUnits}</select></label><label>Staff name<input name="officerName" placeholder="Staff member's name"></label><label>Institutional email<input name="officerEmail" type="email" placeholder="name@ucc.edu.gh" required></label><button class="btn" type="submit">Assign and send link</button></form><div class="assignment-result" aria-live="polite"></div>` : '<p class="staff-restricted">Only an administrator for the functional unit may assign a staff member.</p>'}${assignmentHistory(ticket)}</section>
+      ${routingNotice(ticket)}
+      ${assignmentNarrative(ticket)}
+      <section class="staff-assignment-panel"><div><h4>Staff email assignment</h4><p>Red means not opened. Yellow means the staff member opened the secure link. Green means all resolution checks were completed.</p></div>${canAssign ? `<form class="staff-assignment-form"><label>Functional unit<select name="unitId" required>${assignmentUnits}</select></label><label>First name<input name="officerFirstName" autocomplete="given-name" required></label><label>Middle name <small>(optional)</small><input name="officerMiddleName" autocomplete="additional-name"></label><label>Surname<input name="officerLastName" autocomplete="family-name" required></label><label>Institutional email<input name="officerEmail" type="email" placeholder="name@ucc.edu.gh" required></label><button class="btn" type="submit">Assign and send link</button></form><div class="assignment-result" aria-live="polite"></div>` : '<p class="staff-restricted">Only an administrator for the functional unit may assign a staff member.</p>'}${assignmentHistory(ticket)}</section>
       <div class="ticket-two-column"><section class="evidence-panel"><h4>Student evidence</h4>${evidence(ticket, ticket.evidence, 'evidence')}</section><section class="evidence-panel"><h4>Officer evidence</h4>${evidence(ticket, ticket.officerEvidence, 'officer-evidence')}${canEdit ? `<form class="officer-evidence-form" enctype="multipart/form-data"><label>Files<input name="evidenceFiles" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.webp,.txt"></label><label>Evidence note<input name="note" placeholder="Source and relevance"></label><button class="btn secondary" type="submit">Attach</button></form>` : ''}</section></div>
       ${canEdit ? `<section class="case-update-panel"><h4>${monitoringOnly ? 'Monitoring note' : 'Receiving-unit action'}</h4><p>${monitoringOnly ? 'This role may attach centre evidence, add internal monitoring notes, and escalate through reassignment; it cannot issue operational decisions.' : 'Accept the assignment, record progress, request student evidence, issue a resolution, or return the case to Student Support.'}</p><div class="case-controls"><label>Action<select class="staff-action">${actionOptions}</select></label><label class="wide">Case note<textarea class="staff-note" placeholder="Required. Explain the action, evidence needed, progress, or decision."></textarea></label><button class="btn staff-update" type="button">Record action</button></div></section>` : `<p class="staff-restricted">${staff.role === 'viewer' ? 'Your viewer role is read-only.' : 'This referral is historical or has reached a decision or closed state.'}</p>`}
       <div class="ticket-two-column"><section class="evidence-panel"><h4>Student-facing progress</h4>${studentUpdates(ticket)}</section><section class="evidence-panel"><h4>Referral and reassignment history</h4>${history(ticket)}</section></div>
@@ -216,13 +255,12 @@
     try {
       const body = Object.fromEntries(new FormData(event.currentTarget));
       const response = await fetch(`/api/staff/referrals/${encodeURIComponent(article.dataset.id)}/staff-assignments`, { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(body) });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || 'The staff assignment could not be created.');
+      const data = await apiResponse(response, 'The staff assignment could not be created.');
       const activationLink = data.activationUrl ? ` <a href="${esc(data.activationUrl)}" target="_blank" rel="noopener">Open or copy account activation link</a>` : '';
       result.innerHTML = `<p class="assignment-link-result">${esc(data.message)}${activationLink} <a href="${esc(data.secureUrl)}" target="_blank" rel="noopener">Open or copy assigned-case link</a></p>`;
       show(`Assigned ${data.reference} to ${body.officerEmail}.`, true);
       button.disabled = false;
-    } catch (error) { result.textContent = error.message; show(error.message, false); button.disabled = false; }
+    } catch (error) { result.innerHTML = `<p class="assignment-error-result"><strong>Assignment not completed.</strong> ${esc(error.message)}</p>`; show(error.message, false); button.disabled = false; }
   }
   async function reassign(event) {
     const article = event.currentTarget.closest('.staff-referral-card');

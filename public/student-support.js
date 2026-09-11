@@ -5,6 +5,10 @@
   const trackForm = document.getElementById('trackForm');
   const trackMessage = document.getElementById('trackMessage');
   const ticketResult = document.getElementById('ticketResult');
+  const trackingDialog = document.getElementById('trackTicketDialog');
+  const closeTrackingButton = document.getElementById('closeTrackDialog');
+  const centreOptions = document.getElementById('studyCentreOptions');
+  const centreSelectionCount = document.getElementById('centreSelectionCount');
   const params = new URLSearchParams(location.search);
   let currentAccessToken = params.get('token') || '';
   let currentEmail = '';
@@ -39,6 +43,40 @@
   const show = (element, text, ok) => { if (!element) return; element.textContent = text; element.className = `status show ${ok ? 'ok' : 'bad'}`; };
   const authFields = () => currentAccessToken ? { accessToken: currentAccessToken } : { email: currentEmail || document.getElementById('trackEmail')?.value.trim() || '' };
 
+  function openTrackingDialog() {
+    if (!trackingDialog) return;
+    if (!trackingDialog.open) {
+      if (typeof trackingDialog.showModal === 'function') trackingDialog.showModal();
+      else trackingDialog.setAttribute('open', '');
+    }
+    supportForm?.setAttribute('inert', '');
+    page.classList.add('tracking-open');
+    requestAnimationFrame(() => (currentAccessToken ? closeTrackingButton : document.getElementById('trackReference'))?.focus());
+  }
+  function closeTrackingDialog() {
+    if (!trackingDialog) return;
+    if (typeof trackingDialog.close === 'function' && trackingDialog.open) trackingDialog.close();
+    else trackingDialog.removeAttribute('open');
+    supportForm?.removeAttribute('inert');
+    page.classList.remove('tracking-open');
+  }
+  function selectedSupportCentres() {
+    return centreOptions ? [...centreOptions.querySelectorAll('input[name="studyCentre"]:checked')].map(input => input.value) : [];
+  }
+  function updateSupportCentreCount() {
+    if (!centreSelectionCount) return;
+    const selected = selectedSupportCentres();
+    const required = page.dataset.originRole && page.dataset.originRole !== 'student';
+    centreSelectionCount.textContent = selected.length ? `Selected: ${selected[0]}` : required ? 'Select one study centre.' : 'No study centre selected. Tick one if applicable.';
+    centreSelectionCount.classList.toggle('centre-error', required && !selected.length);
+  }
+  function handleSupportCentreChoice(event) {
+    const selected = event.target.closest('input[name="studyCentre"]');
+    if (!selected || !selected.checked || !centreOptions) return updateSupportCentreCount();
+    centreOptions.querySelectorAll('input[name="studyCentre"]:checked').forEach(input => { if (input !== selected) input.checked = false; });
+    updateSupportCentreCount();
+  }
+
   function updates(ticket) {
     const items = ticket.updates || [];
     return items.length ? `<ol class="ticket-timeline">${items.map(update => `<li><strong>${esc(update.label)}</strong><span>${esc(formatDate(update.at))}</span><p>${esc(update.message)}</p></li>`).join('')}</ol>` : '<p>No progress updates have been recorded yet.</p>';
@@ -63,7 +101,9 @@
     const slaText = ticket.sla?.paused ? `Paused: ${ticket.sla.pauseReason || 'awaiting information'}` : ticket.sla?.overdue ? 'Overdue' : ticket.sla?.atRisk ? 'Due soon' : 'Within target';
     const languageLabel=({en:'English',tw:'Twi',fr:'French'})[ticket.language]||'English';
     const notificationLabel=({'email':'Email only','email-sms':'Email and SMS','email-whatsapp':'Email and WhatsApp'})[ticket.notificationPreference]||'Email only';
-    ticketResult.innerHTML = `<div class="ticket-result-head"><div><span class="ticket-ref-label">${esc(ticket.reference)}</span><h3>${esc(ticket.subject || 'Support matter')}</h3></div><span class="status-chip status-${esc(ticket.status)}">${esc(statusLabels[ticket.status] || ticket.status)}</span></div><dl><dt>Matter</dt><dd>${ticket.type === 'service-request' ? 'Service request' : 'Complaint'}</dd><dt>Category</dt><dd>${esc(ticket.category)}</dd><dt>Responsible unit</dt><dd>${esc(ticket.ownerUnit)}</dd><dt>Reported urgency</dt><dd>${esc(ticket.priority)}</dd><dt>Evidence received</dt><dd>${esc(ticket.evidenceCount || 0)} file(s)</dd><dt>Assistance language</dt><dd>${esc(languageLabel)}</dd><dt>Notifications</dt><dd>${esc(notificationLabel)}</dd><dt>Service target</dt><dd>${ticket.sla?.paused ? esc(slaText) : esc(formatDate(ticket.dueAt))}</dd><dt>SLA position</dt><dd>${esc(slaText)}</dd><dt>Last updated</dt><dd>${esc(formatDate(ticket.lastUpdatedAt))}</dd></dl><section class="ticket-updates"><h4>Case progress</h4>${updates(ticket)}</section>${ticket.resolution ? `<section class="ticket-decision"><h4>Decision</h4><p>${esc(ticket.resolution)}</p></section>` : ''}${responseForm(ticket)}${decisionPanel(ticket)}${feedbackPanel(ticket)}`;
+    const decision = ticket.finalDecision || null;
+    const decisionMarkup = ticket.resolution ? `<details class="ticket-decision decision-disclosure"><summary>${esc(decision?.label || 'Decision')} narrative</summary><p>${esc(decision?.narrative || ticket.resolution)}</p>${decision?.unitLabel || decision?.at ? `<small>${decision?.unitLabel ? esc(decision.unitLabel) : ''}${decision?.unitLabel && decision?.at ? ' · ' : ''}${decision?.at ? esc(formatDate(decision.at)) : ''}</small>` : ''}</details>` : '';
+    ticketResult.innerHTML = `<div class="ticket-result-head"><div><span class="ticket-ref-label">${esc(ticket.reference)}</span><h3>${esc(ticket.subject || 'Support matter')}</h3></div><span class="status-chip status-${esc(ticket.status)}">${esc(statusLabels[ticket.status] || ticket.status)}</span></div><dl><dt>Matter</dt><dd>${ticket.type === 'service-request' ? 'Service request' : 'Complaint'}</dd><dt>Category</dt><dd>${esc(ticket.category)}</dd><dt>Responsible unit</dt><dd>${esc(ticket.ownerUnit)}</dd><dt>Reported urgency</dt><dd>${esc(ticket.priority)}</dd><dt>Evidence received</dt><dd>${esc(ticket.evidenceCount || 0)} file(s)</dd><dt>Assistance language</dt><dd>${esc(languageLabel)}</dd><dt>Notifications</dt><dd>${esc(notificationLabel)}</dd><dt>Service target</dt><dd>${ticket.sla?.paused ? esc(slaText) : esc(formatDate(ticket.dueAt))}</dd><dt>SLA position</dt><dd>${esc(slaText)}</dd><dt>Last updated</dt><dd>${esc(formatDate(ticket.lastUpdatedAt))}</dd></dl><section class="ticket-updates"><h4>Case progress</h4>${updates(ticket)}</section>${decisionMarkup}${responseForm(ticket)}${decisionPanel(ticket)}${feedbackPanel(ticket)}`;
     ticketResult.querySelector('.student-response-form')?.addEventListener('submit', submitResponse);
     ticketResult.querySelector('.accept-resolution')?.addEventListener('click', () => submitDecision('accept', 'Resolution accepted by student.'));
     ticketResult.querySelector('.reopen-case')?.addEventListener('click', () => openDecisionForm('reopen'));
@@ -153,8 +193,11 @@
       const data = await response.json();
       if (!response.ok) return;
       categoryInformation = Object.fromEntries((data.categories || []).map(item => [item.id, item]));
-      const centre = document.getElementById('studyCentre');
-      if (centre?.tagName === 'SELECT') centre.innerHTML = '<option value="">Select study centre</option>' + data.studyCentres.map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join('') + '<option value="Other / Online">Other / Online</option>';
+      if (centreOptions) {
+        const centres = [...(data.studyCentres || []), 'Other / Online'];
+        centreOptions.innerHTML = centres.map((name, index) => `<label class="centre-check-option" for="supportCentre${index}"><input id="supportCentre${index}" type="checkbox" name="studyCentre" value="${esc(name)}"><span>${esc(name)}</span></label>`).join('');
+        updateSupportCentreCount();
+      }
       const department = document.getElementById('academicDepartment');
       if (department) department.innerHTML = '<option value="">Select department</option>' + data.departments.map(item => `<option value="${esc(item.id)}">${esc(item.label)}</option>`).join('');
       const language = document.getElementById('language');
@@ -193,6 +236,11 @@
     if(language&&requestedLanguage&&[...language.options].some(option=>option.value===requestedLanguage)) language.value=requestedLanguage;
   }
   applyRequestedDefaults();
+  document.querySelectorAll('[data-open-tracker]').forEach(button => button.addEventListener('click', openTrackingDialog));
+  closeTrackingButton?.addEventListener('click', closeTrackingDialog);
+  trackingDialog?.addEventListener('click', event => { if (event.target === trackingDialog) closeTrackingDialog(); });
+  trackingDialog?.addEventListener('close', () => { supportForm?.removeAttribute('inert'); page.classList.remove('tracking-open'); });
+  centreOptions?.addEventListener('change', handleSupportCentreChoice);
   document.getElementById('category')?.addEventListener('change', syncCategoryGuidance);
   document.getElementById('language')?.addEventListener('change', syncCategoryGuidance);
   loadSupportConfig();
@@ -200,6 +248,11 @@
   supportForm?.addEventListener('submit', async event => {
     event.preventDefault();
     if (!supportForm.reportValidity()) return;
+    if (page.dataset.originRole !== 'student' && !selectedSupportCentres().length) {
+      updateSupportCentreCount();
+      centreOptions?.focus();
+      return show(supportMessage, 'Select the student study centre before submitting the assisted matter.', false);
+    }
     const formData = new FormData(supportForm);
     const submittedEmail = String(formData.get('email') || '').trim();
     formData.append('originRole', page.dataset.originRole || 'student');
@@ -215,16 +268,19 @@
       show(supportMessage, `Submitted successfully. Your permanent reference is ${data.ticket.reference}. Save this number for tracking.`, true);
       supportMessage.insertAdjacentHTML('beforeend', `<div class="receipt-actions"><button type="button" class="btn secondary copy-reference" data-reference="${esc(data.ticket.reference)}">Copy reference</button><button type="button" class="btn track-new-ticket">Open ticket status</button></div>`);
       supportMessage.querySelector('.copy-reference')?.addEventListener('click', event => navigator.clipboard?.writeText(event.currentTarget.dataset.reference));
-      supportMessage.querySelector('.track-new-ticket')?.addEventListener('click', () => { document.getElementById('trackReference').value = data.ticket.reference; document.getElementById('trackEmail').value = submittedEmail; trackTicket(); document.getElementById('trackForm').scrollIntoView({ behavior:'smooth' }); });
+      supportMessage.querySelector('.track-new-ticket')?.addEventListener('click', () => { currentAccessToken = ''; document.getElementById('trackReference').value = data.ticket.reference; document.getElementById('trackEmail').value = submittedEmail; openTrackingDialog(); trackTicket(); });
       supportForm.reset();
       applyRequestedDefaults();
       syncCategoryGuidance();
+      updateSupportCentreCount();
     } catch (error) { show(supportMessage, error.message || 'The matter could not be submitted.', false); }
     finally { button.disabled = false; }
   });
+  supportForm?.addEventListener('reset', () => setTimeout(updateSupportCentreCount));
   trackForm?.addEventListener('submit', event => { event.preventDefault(); if (trackForm.reportValidity()) { currentAccessToken = ''; trackTicket(); } });
   if (currentAccessToken && trackForm) {
     trackForm.classList.add('hidden');
+    openTrackingDialog();
     trackTicket();
   }
 })();

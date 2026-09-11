@@ -10,7 +10,7 @@
 <body class="support-page" data-origin-role="student" data-default-type="complaint">
   <header class="topbar">
     <div class="brand"><img src="/ucc-logo.png" alt="University of Cape Coast logo"><div><h1>CoDE Academic Services</h1><small>Student Support Services Portal</small></div></div>
-    <nav class="service-nav" aria-label="Main navigation"><a href="/">Home</a><a href="/support-knowledge-base.html">Knowledge base</a><a href="#trackForm">Track ticket</a><a href="/submissions">Submissions</a><a href="/staff-login.html">Staff login</a></nav>
+    <nav class="service-nav" aria-label="Main navigation"><a href="/">Home</a><a href="/support-knowledge-base.html">Knowledge base</a><button type="button" data-open-tracker>Track ticket</button><a href="/submissions">Submissions</a><a href="/staff-login.html">Staff login</a></nav>
   </header>
   <main class="support-shell">
     <section class="page-intro"><span class="eyebrow">Student Support Services</span><h2>How can we help?</h2><p>Submit a complaint or request a service. You will receive a permanent reference and can follow every update to resolution.</p></section>
@@ -23,7 +23,7 @@
             <div class="field"><label for="type">Matter type <span class="req">*</span></label><select id="type" name="type" required><option value="complaint">Complaint</option><option value="service-request">Service request</option></select></div>
             <div class="field"><label for="category">Category <span class="req">*</span></label><select id="category" name="category" required><option value="general">General or not sure</option><option value="incomplete-result">Incomplete result</option><option value="fees-payment">Fees or payment issue</option><option value="certificate">Certificate issue</option><option value="change-of-name">Change of name</option><option value="transcript">Transcript request</option><option value="deferment">Request for deferment</option><option value="resumption-deferment">Request for resumption from deferment</option><option value="resumption-rustication">Request for resumption from rustication</option><option value="registration-challenge">Registration challenge</option><option value="change-study-centre">Change of study centre</option><option value="centre-transit">Transit between centres</option><option value="programme-department">Programme or departmental issue</option><option value="assessment-project">Assessment, project work or teaching practice</option><option value="sensitive">Sensitive or confidential complaint</option></select></div>
             <div class="field"><label for="priority">How urgent is the matter? <span class="req">*</span></label><select id="priority" name="priority" required><option value="normal">Normal</option><option value="low">Low</option><option value="high">High, causing a serious delay</option><option value="urgent">Urgent, immediate action needed</option></select><small class="hint">Student Support Services will confirm the operational priority during screening.</small></div>
-            <div class="field"><label for="studyCentre">Study centre</label><select id="studyCentre" name="studyCentre"><option value="">Loading study centres…</option></select></div>
+            <div class="field"><span id="studyCentreLabel" class="field-label">Study centre</span><div id="studyCentreOptions" class="centre-checklist support-centre-checklist" role="group" tabindex="-1" aria-labelledby="studyCentreLabel" aria-describedby="centreSelectionCount"><div class="centre-placeholder">Loading study centres…</div></div><div id="centreSelectionCount" class="centre-selection-count">No study centre selected. Tick one if applicable.</div></div>
           </div>
           <div id="serviceExpectation" class="service-expectation" aria-live="polite"></div>
           <div id="academicFields" class="grid2" hidden>
@@ -33,8 +33,12 @@
         </section>
         <section class="section">
           <h3>2. Your details</h3>
+          <div class="grid3 person-name-grid">
+            <div class="field"><label for="firstName">First name <span class="req">*</span></label><input id="firstName" name="firstName" autocomplete="given-name" required maxlength="100"></div>
+            <div class="field"><label for="middleName">Middle name <span class="optional-label">Optional</span></label><input id="middleName" name="middleName" autocomplete="additional-name" maxlength="100"></div>
+            <div class="field"><label for="lastName">Surname <span class="req">*</span></label><input id="lastName" name="lastName" autocomplete="family-name" required maxlength="100"></div>
+          </div>
           <div class="grid2">
-            <div class="field"><label for="name">Full name <span class="req">*</span></label><input id="name" name="name" autocomplete="name" required></div>
             <div class="field"><label for="studentNumber">Index or student number</label><input id="studentNumber" name="studentNumber" autocomplete="off"></div>
             <div class="field"><label for="studyLevel">Learner level <span class="req">*</span></label><select id="studyLevel" name="studyLevel" required><option value="undergraduate">Undergraduate</option><option value="postgraduate">Postgraduate</option><option value="certificate-microcredential">Certificate or microcredential</option><option value="other">Other CoDE learner</option></select></div>
             <div class="field"><label for="email">Email <span class="req">*</span></label><input id="email" name="email" type="email" autocomplete="email" required></div>
@@ -56,11 +60,17 @@
         <div class="actions"><button class="btn secondary" type="reset">Clear</button><button class="btn" type="submit">Submit and get reference</button></div>
       </form>
       <aside class="support-aside" aria-label="Ticket tracking and guidance">
-        <section class="resource-section tracking-card"><h3>Track an existing ticket</h3><p class="section-note">Use the permanent reference and the email used to submit the matter.</p><form id="trackForm"><div class="field"><label for="trackReference">Ticket reference</label><input id="trackReference" required placeholder="CAS-20260908-ABC123" autocomplete="off"></div><div class="field"><label for="trackEmail">Email</label><input id="trackEmail" type="email" required autocomplete="email"></div><button class="btn" type="submit">View ticket status</button></form><div id="trackMessage" class="status" role="status" aria-live="polite"></div><div id="ticketResult" class="ticket-result hidden"></div></section>
+        <section class="resource-section track-launcher"><h3>Already submitted?</h3><p class="section-note">Open a focused tracking window. The new complaint or request form will stay out of the way while you check progress.</p><button class="btn" type="button" data-open-tracker>Track an existing ticket</button></section>
         <section class="resource-section quick-services"><h3>Frequently requested services</h3><div class="quick-service-links"><a href="?type=service-request&amp;category=registration-challenge">Registration challenge</a><a href="?type=service-request&amp;category=deferment">Request for deferment</a><a href="?type=service-request&amp;category=resumption-deferment">Resume after deferment</a><a href="?type=service-request&amp;category=resumption-rustication">Resume after rustication</a><a href="?type=service-request&amp;category=transcript">Transcript request</a><a href="?type=complaint&amp;category=incomplete-result">Incomplete result</a><a href="/support-knowledge-base.html">View all guides</a></div></section><section class="support-guidance"><h3>What happens next?</h3><ol><li>Student Support records the request for monitoring.</li><li>The responsible unit receives the same reference and provides updates.</li><li>You can add information, accept a resolution, reopen the matter or appeal.</li></ol><p>Sensitive complaints use a restricted confidential pathway.</p></section>
       </aside>
     </div>
   </main>
+  <dialog id="trackTicketDialog" class="track-dialog" aria-labelledby="trackDialogTitle">
+    <div class="track-dialog-shell">
+      <div class="track-dialog-head"><div><span class="eyebrow">Student Support Services</span><h2 id="trackDialogTitle">Track your complaint or request</h2><p>Enter the permanent reference and email used for the submission.</p></div><button id="closeTrackDialog" class="track-dialog-close" type="button" aria-label="Close ticket tracking">×</button></div>
+      <div class="track-dialog-content"><form id="trackForm" class="track-lookup-form"><div class="grid2"><div class="field"><label for="trackReference">Ticket reference</label><input id="trackReference" required placeholder="CAS-20260908-ABC123" autocomplete="off"></div><div class="field"><label for="trackEmail">Email used to submit</label><input id="trackEmail" type="email" required autocomplete="email"></div></div><button class="btn" type="submit">View ticket status</button></form><div id="trackMessage" class="status" role="status" aria-live="polite"></div><div id="ticketResult" class="ticket-result hidden"></div></div>
+    </div>
+  </dialog>
   <footer>CoDE Academic Services · Student Support Services · University of Cape Coast</footer>
   <script src="/student-support.js"></script>
 </body>
