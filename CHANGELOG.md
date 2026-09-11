@@ -1,5 +1,32 @@
 # Changelog
 
+## 43.0.0 controlled HoD claim approval
+
+- Added account-controlled HoD signature profiles and password-confirmed approval decisions.
+- Generates a separate approved-claim PDF with a verification code and source fingerprint while preserving the original claim.
+- Added claimant email certification and prohibited artificial claimant signatures.
+- Added centre-aware project-group counting and selectable part-payment units with mandatory reconciliation reasons.
+- Added departmental and Payroll Approved for Payment registers, full audit access, and Payroll return-to-department processing.
+- Invalidates prior HoD approval after source/review changes and requires fresh approval.
+
+## 42.0.0 focused tracking and structured identity fields
+
+- Moved student and coordinator ticket tracking into a responsive, accessible modal so the submission form does not distract the user during lookup and review.
+- Preserved the separate tracking-only page for signed email links.
+- Replaced Student Support study-centre select menus with single-choice checkbox lists and added assisted-submission centre validation.
+- Added optional middle-name fields and separate first-name and surname fields to every active person-name entry workflow.
+- Stored structured name parts while preserving combined display names and compatibility with older records and API clients.
+- Expanded portal contract and integration checks for the new fields, modal and validation rules.
+
+## 41.0.0 assignment, decision and redirection audit
+
+- Converted staff-assignment failures into readable inline reasons and added a protected server-side failure response.
+- Recorded assignment colour transitions and exposed click-to-open resolution and final-decision narratives.
+- Synchronized final decisions to green across Student Support, responsible-unit, student tracking and downloadable registers.
+- Corrected Student Support reassignment to act on the current responsible office rather than its oversight copy.
+- Retained redirected cases in the former unit as read-only records with destination, date, officer and reason.
+- Expanded complaint and request exports with redirection and decision history.
+
 ## 40.0.0 automatic staff account activation
 
 - Creates a permanent Officer account automatically when a complaint or request is first assigned to a new institutional email.

@@ -1,0 +1,35 @@
+CoDE Academic Services v43
+==========================
+
+HoD approval and claimant certification
+----------------------------------------
+- Developer accounts can grant HoD payment-approval authority per department.
+- An authorised HoD uploads one protected PNG/JPEG signature through an individual account.
+- Each approval requires that HoD's account password and creates a separate approved PDF.
+- The PDF contains the claim/department/claimant, approved quantity, payment type, reconciliation reason, HoD name/signature, UTC approval time, verification code/link and source fingerprint.
+- Original uploaded claim documents are not edited.
+- Claimants tick the declaration and confirm a protected email link. The record states who certified, the staff ID/email and time; no artificial handwritten signature is created.
+
+Payment processing
+------------------
+- Approve for Consolidation / Claim Verification remains separate from Approve for Payment.
+- HoDs select the payable groups, candidates or dissertation activities.
+- A part-payment or adjusted quantity requires a reconciliation reason.
+- Departments can download their Approved for Payment register.
+- Payroll can download all department-signed claims and its separate Payroll Approved for Payment register.
+- Payroll can return a claim to the department with a required reason. The department sees that reason and must approve again after correction.
+- Auditor receives only Payroll-approved/paid claims and can access the approved PDF and complete audit history.
+- Review/source changes cancel the current electronic approval automatically.
+
+Project group counting
+----------------------
+- Distinct groups use Programme Code + Study Centre Code + Group Number.
+- Group 1 at Centre A and Group 1 at Centre B are two payable group units.
+
+Verification performed
+----------------------
+- npm run check
+- npm run test:portals
+- npm run test:payments
+
+The payment workflow integration test covers HoD signature upload, password failure messaging, centre-aware group count, part-payment, immutable source claim, approval PDF, both payment registers, Payroll approval/return, Auditor gate, reapproval, verification code and post-approval invalidation.

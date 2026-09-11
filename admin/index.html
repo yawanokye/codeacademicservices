@@ -11,6 +11,7 @@
 <main>
 <section class="summary-grid"><article><span>All submissions</span><strong id="total">0</strong></article><article><span>Project work total</span><strong id="project">0</strong></article><article><span>Distance project work</span><strong id="distanceProject">0</strong></article><article><span>Non-Residential project work</span><strong id="nonResidentialProject">0</strong></article><article><span>Field Experience & Teaching Practice</span><strong id="fieldExperience">0</strong></article><article><span>Dissertations</span><strong id="dissertation">0</strong></article><article><span>Assessment / vetting reports</span><strong id="assessor">0</strong></article><article><span>Approved Distance score rows</span><strong id="scoreRows">0</strong></article><article><span>Approved Non-Residential rows</span><strong id="nonResidentialScoreRows">0</strong></article><article><span>Approved Field/Teaching rows</span><strong id="fieldScoreRows">0</strong></article></section>
 <section class="search-card"><div><h2>Department submissions</h2><p>Use the tabs to manage each submission category separately.</p></div><input id="search" type="search" placeholder="Search names, index numbers, programme, reference…"></section>
+<section class="hod-approval-card"><div><div class="section-kicker">Payment approval</div><h2>HoD Signature and Payment Register</h2><p id="hodSignatureStatus">Checking your HoD approval authority…</p></div><form id="hodSignatureForm"><label>Protected signature image<input id="hodSignatureFile" name="signature" type="file" accept=".png,.jpg,.jpeg" required></label><button class="btn primary" type="submit">Upload / Replace Signature</button></form><a id="paymentApprovedRegisterLink" class="btn" href="#">Department Approved for Payment Register</a></section>
 
 <nav class="admin-tabs" aria-label="Submission categories">
   <button class="admin-tab active" type="button" data-tab="project">Undergraduate Project Work <span id="projectTabCount">0</span></button>
@@ -81,7 +82,26 @@
 </section>
 </main>
 
-<dialog id="assignmentDialog"><form id="assignmentForm" class="assignment-form"><div class="dialog-head"><div><div class="eyebrow">Secure dissertation distribution</div><h2 id="assignmentDialogTitle">Email Selected</h2></div><button id="closeAssignmentDialog" class="close-btn" type="button">×</button></div><div class="dialog-content"><div class="selection-summary"><strong id="assignmentSelectionCount">0 dissertations selected</strong><span id="assignmentSelectionHelp">One secure workspace link will be created for the selected works. Student details are tied to the assignment.</span></div><input id="assignmentType" type="hidden" value="assessment"><datalist id="adminTitleOptions"><option value="Mr"><option value="Mrs"><option value="Ms"><option value="Miss"><option value="Dr"><option value="Prof."><option value="Rev."><option value="Ing."><option value="Esq."></datalist><div class="form-grid"><label><span id="assignmentRoleTitleLabel">Assessor's Title</span><input id="assignmentAssessorTitle" list="adminTitleOptions" required maxlength="40"></label><label><span id="assignmentRoleFirstLabel">Assessor's First Name</span><input id="assignmentAssessorFirstName" required maxlength="100" autocomplete="given-name"></label><label><span id="assignmentRoleLastLabel">Assessor's Surname / Last Name</span><input id="assignmentAssessorLastName" required maxlength="100" autocomplete="family-name"></label><label><span id="assignmentRoleEmailLabel">Assessor's Email</span><input id="assignmentAssessorEmail" required type="email" maxlength="240" autocomplete="email"></label><label>Link Validity (days)<input id="assignmentExpiryDays" required type="number" min="1" max="60" value="14"></label><label class="wide">Optional Message<textarea id="assignmentMessage" rows="4" maxlength="4000" placeholder="Assessment or vetting instructions, if any"></textarea></label></div><div id="assignmentFormStatus" class="form-status hidden"></div><div class="dialog-actions"><button class="btn" id="cancelAssignment" type="button">Cancel</button><button class="btn email" id="sendAssignment" type="submit">Create Secure Link & Send Email</button></div></div></form></dialog>
+<dialog id="assignmentDialog">
+  <form id="assignmentForm" class="assignment-form">
+    <div class="dialog-head"><div><div class="eyebrow">Secure dissertation distribution</div><h2 id="assignmentDialogTitle">Email Selected</h2></div><button id="closeAssignmentDialog" class="close-btn" type="button">×</button></div>
+    <div class="dialog-content">
+      <div class="selection-summary"><strong id="assignmentSelectionCount">0 dissertations selected</strong><span id="assignmentSelectionHelp">One secure workspace link will be created for the selected works. Student details are tied to the assignment.</span></div>
+      <input id="assignmentType" type="hidden" value="assessment">
+      <datalist id="adminTitleOptions"><option value="Mr"><option value="Mrs"><option value="Ms"><option value="Miss"><option value="Dr"><option value="Prof."><option value="Rev."><option value="Ing."><option value="Esq."></datalist>
+      <div class="form-grid">
+        <label><span id="assignmentRoleTitleLabel">Assessor's Title</span><input id="assignmentAssessorTitle" list="adminTitleOptions" required maxlength="40"></label>
+        <label><span id="assignmentRoleFirstLabel">Assessor's First Name</span><input id="assignmentAssessorFirstName" required maxlength="100" autocomplete="given-name"></label>
+        <label><span id="assignmentRoleMiddleLabel">Assessor's Middle Name (optional)</span><input id="assignmentAssessorMiddleName" maxlength="100" autocomplete="additional-name"></label>
+        <label><span id="assignmentRoleLastLabel">Assessor's Surname / Last Name</span><input id="assignmentAssessorLastName" required maxlength="100" autocomplete="family-name"></label>
+        <label><span id="assignmentRoleEmailLabel">Assessor's Email</span><input id="assignmentAssessorEmail" required type="email" maxlength="240" autocomplete="email"></label>
+        <label>Link Validity (days)<input id="assignmentExpiryDays" required type="number" min="1" max="60" value="14"></label>
+        <label class="wide">Optional Message<textarea id="assignmentMessage" rows="4" maxlength="4000" placeholder="Assessment or vetting instructions, if any"></textarea></label>
+      </div>
+      <div id="assignmentFormStatus" class="form-status hidden"></div><div class="dialog-actions"><button class="btn" id="cancelAssignment" type="button">Cancel</button><button class="btn email" id="sendAssignment" type="submit">Create Secure Link &amp; Send Email</button></div>
+    </div>
+  </form>
+</dialog>
 <dialog id="detailDialog"><div class="dialog-head"><div><div class="eyebrow">Submission record</div><h2 id="detailReference"></h2></div><button id="closeDialog" class="close-btn">×</button></div><div id="detailBody"></div></dialog>
 <script src="/admin/admin.js"></script>
 </body></html>

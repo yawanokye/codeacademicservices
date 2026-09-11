@@ -1,0 +1,39 @@
+CoDE Academic Services Portal v42
+
+FOCUSED STUDENT TRACKING
+
+- Track Ticket opens in a modal on the public Student Support page.
+- The assisted submission page uses the same focused modal.
+- The complaint or request form is made inactive while the modal is open.
+- Students can close the modal with the close control, the Escape key or by selecting the backdrop.
+- Signed tracking links remain compatible with the dedicated tracking-only page.
+- Selecting Open Ticket Status after submission fills the reference and email, opens the modal and loads the ticket.
+
+STUDY-CENTRE CHECKBOXES
+
+- Public and assisted Student Support forms render the published study-centre directory as checkboxes.
+- Checking a centre automatically clears any other centre because one complaint or request belongs to one current centre.
+- The public student form allows no centre when the matter is not centre-specific.
+- Centre Coordinator and Regional Administrator assisted submissions require one centre.
+- Server validation rejects multiple submitted centre values, including attempts that bypass the browser control.
+
+STRUCTURED PERSON NAMES
+
+- First name and surname are required, with middle name optional, on Student Support and assisted student submissions.
+- Project Work and Field Experience submitter names use the same structure.
+- Dissertation student and supervisor names include separate middle-name fields.
+- Assessor and Vetter details, including every student work block, include separate middle-name fields.
+- Department dissertation assignment forms, functional-unit staff assignments and Developer Portal staff-account creation use separated name fields.
+- New records save each name part and also generate the combined name used in tables, emails and downloadable registers.
+- Existing records and older clients that send a combined name continue to work.
+
+VERIFICATION
+
+- Server and browser-script syntax checks pass.
+- Inline Project Work, Field Experience, Dissertation and Assessor scripts compile.
+- Edited HTML pages parse successfully.
+- DOM and form contracts verify the modal, checkbox controls and separated name fields.
+- Integration checks pass for all 19 functional units and 9 department or operations roles.
+- Integration checks confirm structured-name persistence, single-centre enforcement, account creation, staff assignment and existing red, yellow and green complaint workflows.
+
+No new npm dependency or Render environment variable is required.

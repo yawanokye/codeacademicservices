@@ -1,3 +1,38 @@
+# v43 update: controlled HoD approval and payment registers
+
+- Authorised HoDs upload a protected signature once through their individual account and confirm every payment approval with their password.
+- Approval creates a separate integrity-checked PDF containing the claim reference, department, HoD identity/signature, approval time, payable quantity, claimant certification and verification code. The original claim file is never modified.
+- Claimants tick a declaration and verify it through their email instead of receiving an artificial cursive signature.
+- Departmental consolidation/claim verification is separate from HoD approval for payment. HoDs can select eligible items for documented part-payment and record the reconciliation reason.
+- Payroll receives the approved PDF and audit trail, can return a claim to the department with a reason, and maintains its own Approved for Payment register.
+- Departments have a separate Approved for Payment register. Auditor visibility still begins only after Payroll approval.
+- Project groups are counted by Programme Code + Study Centre Code + Group Number, so the same group number at different centres is counted separately.
+- Editing approved score/review data invalidates the existing HoD approval and requires fresh approval.
+
+See `PATCH_NOTES_v43.txt` for implementation and verification details.
+
+# v42 update: focused tracking, checkbox centre choice and structured names
+
+- Student ticket tracking now opens in a focused modal on both the public and assisted support pages. The complaint or request form remains behind the modal and cannot be edited while tracking is open.
+- Signed links still use the separate tracking-only page and open ticket results without showing a new submission form.
+- Student Support and assisted submissions now present study centres as checkboxes. Only one centre can be selected for an individual complaint or request, while assisted submissions require a centre.
+- Person names are collected as first name, optional middle name and surname throughout support, project work, field experience, dissertation, assessor, staff-assignment and developer account workflows.
+- Combined display names remain available in registers and emails, while the separate name parts are saved for new records. Existing records and legacy API submissions remain compatible.
+- Automated checks cover the modal contract, checkbox centre controls, structured-name persistence, single-centre validation and the existing complaint workflow.
+
+See `PATCH_NOTES_v42.txt` for the implementation and verification details.
+
+# v41 update: dependable assignment, final-decision and redirection workflow
+
+- Staff-assignment failures now appear as clear, actionable reasons in the portal instead of raw API or JSON output.
+- Assignment creation is protected by a dedicated error boundary, while malformed, non-institutional, suspended and storage-related failures return specific guidance.
+- Red, yellow and green assignment changes are retained as a colour history. A final decision turns the current indicator green across authorised online and downloadable registers.
+- The colour-history control opens the recorded resolution or final-decision narrative, decision date, unit and officer where permitted.
+- Student Support can redirect any visible complaint or request from its actual responsible unit. The former unit keeps a blue, read-only redirected record with the reason and destination.
+- CSV and Excel registers now include redirection history, the current decision narrative, decision officer and date, and earlier decision history.
+
+See `PATCH_NOTES_v41.txt` for the verified workflows.
+
 # v40 update: Automatic permanent account on first assignment
 
 - Assigning a case to a new institutional email now creates a pending permanent Officer account automatically.

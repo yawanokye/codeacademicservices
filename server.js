@@ -10,6 +10,7 @@ const mammoth = require('mammoth');
 const WordExtractor = require('word-extractor');
 const { CanvasFactory } = require('pdf-parse/worker');
 const { PDFParse } = require('pdf-parse');
+const { createApprovalPdf, parsePng, parseJpeg } = require('./lib/approval-pdf');
 
 const app = express();
 
@@ -182,6 +183,8 @@ const DEVELOPER_ADMIN_USER = String(process.env.DEVELOPER_ADMIN_USER || 'develop
 const DEVELOPER_ADMIN_PASSWORD = String(process.env.DEVELOPER_ADMIN_PASSWORD || 'change-this-password');
 const STUDENT_FEEDBACK_EXPIRY_DAYS = Math.min(90, Math.max(1, Number(process.env.STUDENT_FEEDBACK_EXPIRY_DAYS || 30) || 30));
 const ADMIN_INVITATION_EXPIRY_HOURS = Math.min(168, Math.max(1, Number(process.env.ADMIN_INVITATION_EXPIRY_HOURS || 24) || 24));
+const CLAIM_CERTIFICATION_EXPIRY_DAYS = Math.min(30, Math.max(1, Number(process.env.CLAIM_CERTIFICATION_EXPIRY_DAYS || 7) || 7));
+const CLAIMANT_DECLARATION = 'I certify that this claim is accurate and authorize its submission for processing.';
 const PROJECT_HIGH_ROW_WARNING = Math.max(1, Number(process.env.PROJECT_HIGH_ROW_WARNING || 100) || 100);
 const SUPPORT_FORWARD_EXPIRY_DAYS = Math.min(60, Math.max(1, Number(process.env.SUPPORT_FORWARD_EXPIRY_DAYS || 14) || 14));
 const SUPPORT_STATUS_TOKEN_SECRET = String(process.env.SUPPORT_STATUS_TOKEN_SECRET || DEVELOPER_ADMIN_PASSWORD).trim();
@@ -553,6 +556,10 @@ function normalizeAdminDepartments(value) {
   const source = Array.isArray(value) ? value : String(value || '').split(',');
   return [...new Set(source.map(v => String(v || '').trim()).filter(v => departmentFromSlug(v)))];
 }
+function normalizeHodDepartments(value, assignedDepartments=[]) {
+  const assigned=new Set(normalizeAdminDepartments(assignedDepartments));
+  return normalizeAdminDepartments(value).filter(slug=>assigned.has(slug));
+}
 function normalizeStaffUnits(value) {
   const source = Array.isArray(value) ? value : String(value || '').split(',');
   return [...new Set(source.map(v => String(v || '').trim()).filter(v => Object.prototype.hasOwnProperty.call(STAFF_UNITS, v)))];
@@ -563,9 +570,10 @@ function publicAdminUser(user) {
   const invitationExpiresAt=user.invitationExpiresAt || null;
   const invitationExpired=Boolean(invitationExpiresAt && new Date(invitationExpiresAt).getTime() <= Date.now());
   return {
-    id:user.id, name:user.name || user.username, username:user.username, email:user.email || '',
-    role:user.role || 'viewer', departments:user.departments || [], sections:user.sections || [], units:normalizeStaffUnits(user.units),
+    id:user.id, name:user.name || user.username, firstName:user.firstName || '', middleName:user.middleName || '', lastName:user.lastName || '', username:user.username, email:user.email || '',
+    role:user.role || 'viewer', departments:user.departments || [], hodDepartments:normalizeHodDepartments(user.hodDepartments,user.departments), sections:user.sections || [], units:normalizeStaffUnits(user.units),
     active:user.active !== false, createdAt:user.createdAt || null,
+    hasHodSignature:Boolean(user.hodSignature?.storedName), signatureUpdatedAt:user.hodSignature?.uploadedAt || null,
     passwordSet, passwordSetAt:user.passwordSetAt || null,
     invitationSentAt:user.invitationSentAt || null, invitationExpiresAt,
     invitationExpired, invitationEmailStatus:user.invitationEmailStatus || null,
@@ -595,7 +603,7 @@ function uniqueStaffUsername(email, accounts) {
   while (used.has(`${base}-${suffix}`)) suffix += 1;
   return `${base}-${suffix}`;
 }
-async function ensureSupportAssignmentAccount({ email, name, unitId, actor }) {
+async function ensureSupportAssignmentAccount({ email, name, firstName='', middleName='', lastName='', unitId, actor }) {
   let result = null;
   await mutateAdminUsers(accounts => {
     let account = accounts.find(item => String(item.email || '').trim().toLowerCase() === email);
@@ -608,7 +616,7 @@ async function ensureSupportAssignmentAccount({ email, name, unitId, actor }) {
     if (!account) {
       const invitation = newAdminInvitation();
       account = {
-        id:crypto.randomUUID(), name:name || email.split('@')[0], email,
+        id:crypto.randomUUID(), name:name || email.split('@')[0], firstName, middleName, lastName, email,
         username:uniqueStaffUsername(email, accounts), role:'officer', departments:[], sections:[], units:[unitId],
         active:true, createdAt:new Date().toISOString(), createdFrom:'support-assignment', createdBy:actor,
         invitationTokenHash:invitation.tokenHash, invitationExpiresAt:invitation.expiresAt, invitationEmailStatus:'pending'
@@ -618,6 +626,12 @@ async function ensureSupportAssignmentAccount({ email, name, unitId, actor }) {
       return result;
     }
     account.units = normalizeStaffUnits(account.units);
+    if (firstName && lastName) {
+      account.firstName = firstName;
+      account.middleName = middleName;
+      account.lastName = lastName;
+      account.name = name;
+    }
     if (!account.units.includes(unitId)) {
       account.units.push(unitId);
       unitAdded = true;
@@ -1137,8 +1151,12 @@ const PERSON_TITLES = new Set(['mr','mrs','ms','miss','dr','prof','professor','r
 function cleanHumanText(value) {
   return String(value || '').trim().replace(/\s+/g, ' ');
 }
-function buildDisplayName(title, firstName, lastName) {
-  return [cleanHumanText(title), cleanHumanText(firstName), cleanHumanText(lastName)].filter(Boolean).join(' ');
+function buildDisplayName(title, firstName, middleName, lastName) {
+  if (arguments.length === 3) {
+    lastName = middleName;
+    middleName = '';
+  }
+  return [cleanHumanText(title), cleanHumanText(firstName), cleanHumanText(middleName), cleanHumanText(lastName)].filter(Boolean).join(' ');
 }
 function personNameTokens(value) {
   return String(value || '')
@@ -1286,7 +1304,7 @@ function publicAssignment(a, dissertationRecordsForDepartment=[], assessorSubmis
   const earlyBirdCount=[...completion.submitted.values()].filter(x=>earlyBirdForSubmission(a,x.record?.submittedAt)).length;
   return {
     id:a.id, reference:a.reference, department:a.department, departmentName:a.departmentName,
-    assessorTitle:a.assessorTitle || '', assessorFirstName:a.assessorFirstName || '', assessorLastName:a.assessorLastName || '',
+    assessorTitle:a.assessorTitle || '', assessorFirstName:a.assessorFirstName || '', assessorMiddleName:a.assessorMiddleName || '', assessorLastName:a.assessorLastName || '',
     assessorName:a.assessorName, assessorEmail:a.assessorEmail, dissertationCount:(a.dissertationIds || []).length,
     assignmentType:a.assignmentType || 'assessment',
     dissertationIds:(a.dissertationIds||[]).slice(),
@@ -1410,6 +1428,28 @@ async function sendGmailHtmlEmail({to, subject, html, attachments=[]}) {
     throw new Error(detail);
   }
   return data;
+}
+function declarationAccepted(value) {
+  return ['1','true','yes','on','accepted'].includes(String(value||'').trim().toLowerCase());
+}
+function newClaimantCertification({name,email,staffId='',verified=false,channel='email-verification'}) {
+  const now=new Date().toISOString(),token=verified?'':crypto.randomBytes(32).toString('hex');
+  return {token,certification:{status:verified?'verified':'pending',declarationText:CLAIMANT_DECLARATION,declaredAt:now,claimantName:cleanHumanText(name),claimantEmail:String(email||'').trim().toLowerCase(),staffId:cleanHumanText(staffId).slice(0,100),verificationChannel:channel,verifiedAt:verified?now:null,tokenHash:token?hashOneTimeToken(token):null,expiresAt:token?new Date(Date.now()+CLAIM_CERTIFICATION_EXPIRY_DAYS*86400000).toISOString():null,emailStatus:verified?'not-required':'pending',history:[{action:'declaration-submitted',at:now,channel}]}};
+}
+function claimantCertificationView(record) {
+  const item=record?.claimantCertification||{};
+  return {status:item.status||'missing',declarationText:item.declarationText||CLAIMANT_DECLARATION,declaredAt:item.declaredAt||null,claimantName:item.claimantName||record?.fullName||record?.assessorName||'',claimantEmail:item.claimantEmail||record?.email||'',staffId:item.staffId||record?.staffId||'',verificationChannel:item.verificationChannel||'',verifiedAt:item.verifiedAt||null,emailStatus:item.emailStatus||'',emailSentAt:item.emailSentAt||null,emailError:item.emailError||'',expiresAt:item.status==='pending'?(item.expiresAt||null):null};
+}
+async function mutateRecordById(id,mutator){return mutateDb(records=>{const record=records.find(item=>item.id===id);return record?mutator(record):null;});}
+async function sendClaimantCertificationEmail({record,token,req}) {
+  if(!token||!isEmail(record?.email))throw new Error('A valid claimant email address is required for certification.');
+  const url=`${baseUrlFor(req)}/claim-certify.html?token=${encodeURIComponent(token)}`,expiry=new Date(record.claimantCertification.expiresAt).toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short',timeZone:'UTC'});
+  const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#182431;line-height:1.55"><div style="max-width:680px;margin:auto;padding:24px"><h2 style="color:#082b4c">Certify your claim</h2><p>Dear ${htmlEscape(record.claimantCertification.claimantName||'Claimant')},</p><p>Your claim <strong>${htmlEscape(record.reference)}</strong> was received. Confirm the declaration below before the department can approve it for payment.</p><blockquote style="margin:18px 0;padding:16px;background:#f5f7fa;border-left:4px solid #d4a72c">${htmlEscape(CLAIMANT_DECLARATION)}</blockquote><p><a href="${htmlEscape(url)}" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 18px;border-radius:7px;font-weight:bold">Review and Certify Claim</a></p><p>This protected link expires on <strong>${htmlEscape(expiry)} UTC</strong>. The system records your name, email, date and time. It does not create an artificial handwritten signature.</p><p>If UCC policy requires a handwritten signature, sign the source claim form and submit it again.</p></div></body></html>`;
+  return sendGmailHtmlEmail({to:record.email,subject:`Certify claim ${record.reference}`,html});
+}
+async function dispatchClaimantCertification(record,token,req) {
+  try{const result=await sendClaimantCertificationEmail({record,token,req});await mutateRecordById(record.id,target=>{if(!target.claimantCertification)return null;target.claimantCertification.emailStatus='sent';target.claimantCertification.emailSentAt=new Date().toISOString();target.claimantCertification.emailProviderMessageId=result.id||'';target.claimantCertification.emailError='';return true;});return {emailSent:true};}
+  catch(error){await mutateRecordById(record.id,target=>{if(!target.claimantCertification)return null;target.claimantCertification.emailStatus='failed';target.claimantCertification.emailError=String(error.message||error).slice(0,500);return true;});console.error('Claimant certification email failed:',error.message);return {emailSent:false,emailError:String(error.message||error)};}
 }
 function assignmentDeadlineDates(baseDate=new Date()) {
   const start=new Date(baseDate);
@@ -1605,22 +1645,29 @@ function parseFlexiblePositiveCount(value) {
   return found&&total>0?total:null;
 }
 function normalizeProjectGroupNumber(value){return cleanHumanText(value).toUpperCase().replace(/\s+/g,' ');}
-function projectUniqueGroupNumbersFromRows(rows){
-  const seen=new Map();
-  for(const row of rows||[]){const raw=cleanHumanText(row?.groupNo);const key=normalizeProjectGroupNumber(raw);if(key&&!seen.has(key))seen.set(key,raw);}
+function projectGroupUnitsFromRows(rows,record={}){
+  const seen=new Map(),selectedCentres=projectStudyCentres(record);
+  for(const row of rows||[]){
+    const rawGroup=cleanHumanText(row?.groupNo),groupKey=normalizeProjectGroupNumber(rawGroup);if(!groupKey)continue;
+    const parts=String(row?.registrationNo||'').split('/').map(value=>value.trim()).filter(Boolean),programme=cleanHumanText(parts[0]||record?.programme||'').toUpperCase()||'UNCLASSIFIED';
+    let centre=parts.length>=3?normalizeCentreCode(`${parts[1]}/${parts[2]}`):'',classified=Boolean(centre);
+    if(!centre&&selectedCentres.length===1){centre=cleanHumanText(selectedCentres[0]).toUpperCase();classified=Boolean(centre);}if(!centre)centre='UNCLASSIFIED';
+    const key=`${programme}|${centre}|${groupKey}`;if(!seen.has(key))seen.set(key,{key,programme,centre,groupNumber:rawGroup,label:`${programme} · ${centre} · Group ${rawGroup}`,classified,registrationNo:cleanHumanText(row?.registrationNo)});
+  }
   return [...seen.values()];
 }
-function projectGroupValidation(record){
-  const rows=validScoreRows(record);
-  const groups=projectUniqueGroupNumbersFromRows(rows);
+function projectUniqueGroupNumbersFromRows(rows,record={}){return projectGroupUnitsFromRows(rows,record).map(unit=>unit.label);}
+function projectGroupValidation(record,{approved=false}={}){
+  const rows=approved?approvedProjectScoreRows(record):validScoreRows(record),groupUnits=projectGroupUnitsFromRows(rows,record),groups=groupUnits.map(unit=>unit.label);
   const claimed=parseFlexiblePositiveCount(record?.groupCount);
   const works=Array.isArray(record?.files?.completedWork)?record.files.completedWork.length:(record?.files?.completedWork?1:0);
   const issues=[];
   if(!claimed) issues.push('The Total Number of Groups Submitting could not be interpreted as a positive number.');
-  if(claimed&&groups.length!==claimed) issues.push(`Claimed groups (${claimed}) differ from the ${groups.length} distinct group number${groups.length===1?'':'s'} in the score sheet.`);
+  if(groupUnits.some(unit=>!unit.classified))issues.push('One or more groups could not be linked to a study centre. Use a registration number containing the programme and centre code, or submit only one selected centre.');
+  if(claimed&&groups.length!==claimed) issues.push(`Claimed groups (${claimed}) differ from the ${groups.length} distinct programme-centre-group combination${groups.length===1?'':'s'} in the score sheet.`);
   if(claimed&&works!==claimed) issues.push(`Claimed groups (${claimed}) differ from the ${works} completed project work file${works===1?'':'s'} attached.`);
   if(groups.length&&works!==groups.length) issues.push(`The score sheet contains ${groups.length} distinct group${groups.length===1?'':'s'}, but ${works} completed project work file${works===1?'':'s'} ${works===1?'was':'were'} attached.`);
-  return {claimedGroupCount:claimed,scoreSheetGroupCount:groups.length,groupNumbers:groups,completedProjectWorkCount:works,valid:issues.length===0,issues};
+  return {claimedGroupCount:claimed,scoreSheetGroupCount:groups.length,groupNumbers:groups,groupKeys:groupUnits.map(unit=>unit.key),groupUnits,completedProjectWorkCount:works,valid:issues.length===0,issues,countingRule:'Programme Code + Study Centre Code + Group Number'};
 }
 function numericSn(v) { return /^\d+(?:\.0+)?$/.test(String(v || '').trim()); }
 
@@ -1851,6 +1898,18 @@ const storage = multer.diskStorage({
   filename: (_req, file, cb) => cb(null, `${Date.now()}-${crypto.randomBytes(6).toString('hex')}-${safeBaseName(file.originalname)}`)
 });
 const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024, files: 80 } });
+const hodSignatureUpload = multer({
+  storage,
+  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => cb(null, ['.png','.jpg','.jpeg'].includes(path.extname(file.originalname || '').toLowerCase()))
+});
+function validateSignatureImage(filePath) {
+  const buffer=fs.readFileSync(filePath);
+  const parsed=buffer[0]===0xff&&buffer[1]===0xd8?parseJpeg(buffer):parsePng(buffer);
+  if(parsed.width<40||parsed.height<15)throw new Error('The signature image is too small. Use an image at least 40 by 15 pixels.');
+  if(parsed.width>5000||parsed.height>2500)throw new Error('The signature image dimensions are too large.');
+  return {width:parsed.width,height:parsed.height,mimeType:buffer[0]===0xff?'image/jpeg':'image/png'};
+}
 const SUPPORT_EVIDENCE_EXTENSIONS = new Set(['.pdf','.doc','.docx','.xls','.xlsx','.csv','.png','.jpg','.jpeg','.webp','.txt']);
 const supportUpload = multer({
   storage,
@@ -1883,8 +1942,9 @@ function requireText(req, fields) { return fields.find(k => !text(req, k)); }
 function submitterName(req, prefix='') {
   const title = text(req, `${prefix}Title`);
   const firstName = text(req, `${prefix}FirstName`);
+  const middleName = text(req, `${prefix}MiddleName`);
   const lastName = text(req, `${prefix}LastName`);
-  return { title, firstName, lastName, fullName: buildDisplayName(title, firstName, lastName) };
+  return { title, firstName, middleName, lastName, fullName: buildDisplayName(title, firstName, middleName, lastName) };
 }
 function validateDepartment(req) {
   const slug = text(req, 'department');
@@ -2041,11 +2101,81 @@ const SUPPORT_ASSIGNMENT_CHECKS = Object.freeze([
   { id:'actionCompleted', label:'I have completed the action required from my functional unit.' },
   { id:'resolutionRecorded', label:'I have recorded a clear resolution for the student and oversight units.' }
 ]);
+const SUPPORT_TERMINAL_STATUSES = new Set(['resolved','final-decision','closed','accepted']);
 function supportAssignmentState(assignment) {
   if (!assignment) return { key:'unassigned', label:'Not assigned to staff', colour:'red' };
+  if (assignment.state === 'superseded') return { key:'redirected', label:'Assignment redirected', colour:'blue' };
   if (assignment.state === 'resolved') return { key:'resolved', label:'Resolved by assigned staff', colour:'green' };
   if (assignment.state === 'opened') return { key:'opened', label:'Opened by assigned staff', colour:'yellow' };
   return { key:'unopened', label:'Assigned, not yet opened', colour:'red' };
+}
+function supportDecisionSummary(ticket, includeOfficer = true) {
+  const saved = ticket?.finalDecision && typeof ticket.finalDecision === 'object' ? ticket.finalDecision : null;
+  const terminal = SUPPORT_TERMINAL_STATUSES.has(ticket?.status);
+  const narrative = String(saved?.narrative || (terminal ? ticket?.resolution : '') || '').trim();
+  if (!saved && !narrative) return null;
+  const unitId = saved?.unitId || ticket?.ownerUnitId || '';
+  const result = {
+    type: saved?.type || (ticket?.status === 'final-decision' ? 'final-decision' : 'resolution'),
+    label: saved?.label || (ticket?.status === 'final-decision' ? 'Final decision' : 'Resolution'),
+    narrative,
+    at: saved?.at || ticket?.resolvedAt || ticket?.lastUpdatedAt || null,
+    unitId,
+    unitLabel: saved?.unitLabel || STAFF_UNITS[unitId]?.label || ticket?.ownerUnit || '',
+    source: saved?.source || 'case-status'
+  };
+  if (includeOfficer) result.by = saved?.by || ticket?.resolvedBy || '';
+  return result;
+}
+function supportArchiveDecision(ticket, { at, by, reason }) {
+  const decision = supportDecisionSummary(ticket);
+  if (!decision?.narrative) {
+    ticket.finalDecision = null;
+    return null;
+  }
+  const archived = { ...decision, supersededAt:at, supersededBy:by, supersededReason:reason || '' };
+  ticket.decisionHistory = Array.isArray(ticket.decisionHistory) ? ticket.decisionHistory : [];
+  const previous = ticket.decisionHistory[ticket.decisionHistory.length - 1];
+  if (!(previous?.at === archived.at && previous?.narrative === archived.narrative)) ticket.decisionHistory.push(archived);
+  if (ticket.decisionHistory.length > 30) ticket.decisionHistory = ticket.decisionHistory.slice(-30);
+  ticket.finalDecision = null;
+  return archived;
+}
+function supportAppendAssignmentTransition(assignment, { colour, label, narrative, at, by, source }) {
+  assignment.stateHistory = Array.isArray(assignment.stateHistory) ? assignment.stateHistory : [];
+  const previous = assignment.stateHistory[assignment.stateHistory.length - 1];
+  if (previous?.colour === colour && previous?.source === source && previous?.narrative === narrative) return;
+  assignment.stateHistory.push({ colour, label, narrative:narrative || '', at, by:by || '', source:source || '' });
+  if (assignment.stateHistory.length > 30) assignment.stateHistory = assignment.stateHistory.slice(-30);
+}
+function supportCompleteCurrentAssignments(ticket, { narrative, actor, at, status, source }) {
+  const unitId = ticket.ownerUnitId || '';
+  const unitLabel = STAFF_UNITS[unitId]?.label || ticket.ownerUnit || '';
+  const label = status === 'final-decision' ? 'Final decision recorded' : 'Resolution recorded';
+  let completed = 0;
+  ticket.staffAssignments = Array.isArray(ticket.staffAssignments) ? ticket.staffAssignments : [];
+  for (const assignment of ticket.staffAssignments) {
+    if (assignment.unitId !== unitId || assignment.state === 'superseded') continue;
+    assignment.state = 'resolved';
+    assignment.resolvedAt = at;
+    assignment.resolvedBy = actor;
+    assignment.resolutionNote = narrative;
+    assignment.completionSource = source;
+    assignment.checks = Object.fromEntries(SUPPORT_ASSIGNMENT_CHECKS.map(item => [item.id, true]));
+    supportAppendAssignmentTransition(assignment, { colour:'green', label, narrative, at, by:actor, source });
+    completed += 1;
+  }
+  const currentReferral = [...(ticket.referrals || [])].reverse().find(item => item.targetUnit === unitId && !['reassigned','closed','cancelled','returned-to-support'].includes(item.status));
+  if (currentReferral) {
+    currentReferral.status = 'resolved';
+    currentReferral.resolvedAt = at;
+    currentReferral.resolvedBy = actor;
+    currentReferral.resolutionNarrative = narrative;
+  }
+  if (status === 'final-decision') {
+    ticket.finalDecision = { type:'final-decision', label:'Final decision', narrative, by:actor, at, unitId, unitLabel, source };
+  }
+  return completed;
 }
 function supportAssignmentSummary(ticket, unitIds = []) {
   const allowed = new Set(normalizeStaffUnits(unitIds));
@@ -2053,11 +2183,20 @@ function supportAssignmentSummary(ticket, unitIds = []) {
     .filter(item => item.state !== 'superseded' && (!allowed.size || allowed.has(item.unitId)))
     .sort((a,b) => String(b.assignedAt || '').localeCompare(String(a.assignedAt || '')));
   const assignment = assignments[0] || null;
-  const state = supportAssignmentState(assignment);
-  return { ...state, id:assignment?.id || '', unitId:assignment?.unitId || '', unitLabel:assignment?.unitLabel || '', officerName:assignment?.officerName || '', officerEmail:assignment?.officerEmail || '', assignedAt:assignment?.assignedAt || null, openedAt:assignment?.openedAt || null, resolvedAt:assignment?.resolvedAt || null, emailStatus:assignment?.emailStatus || '', resolutionNote:assignment?.resolutionNote || '' };
+  const decision = supportDecisionSummary(ticket);
+  const completedCase = SUPPORT_TERMINAL_STATUSES.has(ticket?.status) && Boolean(decision?.narrative);
+  const assignmentState = supportAssignmentState(assignment);
+  const state = completedCase
+    ? ticket.status === 'final-decision'
+      ? { key:'resolved', label:'Final decision recorded', colour:'green' }
+      : assignmentState.colour === 'green'
+        ? assignmentState
+        : { key:'resolved', label:'Case resolved', colour:'green' }
+    : assignmentState;
+  return { ...state, id:assignment?.id || '', unitId:assignment?.unitId || ticket?.ownerUnitId || '', unitLabel:assignment?.unitLabel || ticket?.ownerUnit || '', officerFirstName:assignment?.officerFirstName || '', officerMiddleName:assignment?.officerMiddleName || '', officerLastName:assignment?.officerLastName || '', officerName:assignment?.officerName || '', officerEmail:assignment?.officerEmail || '', assignedAt:assignment?.assignedAt || null, openedAt:assignment?.openedAt || null, resolvedAt:assignment?.resolvedAt || decision?.at || null, emailStatus:assignment?.emailStatus || '', resolutionNote:assignment?.resolutionNote || decision?.narrative || '', resolvedBy:assignment?.resolvedBy || decision?.by || '', completionSource:assignment?.completionSource || decision?.source || '', stateHistory:Array.isArray(assignment?.stateHistory)?assignment.stateHistory:[] };
 }
 function supportAssignmentList(ticket) {
-  return (Array.isArray(ticket?.staffAssignments)?ticket.staffAssignments:[]).filter(item=>item.state!=='superseded').map(item=>({id:item.id,unitId:item.unitId,unitLabel:item.unitLabel,officerName:item.officerName,officerEmail:item.officerEmail,assignedBy:item.assignedBy,assignedAt:item.assignedAt,expiresAt:item.expiresAt,state:supportAssignmentState(item),openedAt:item.openedAt||null,resolvedAt:item.resolvedAt||null,emailStatus:item.emailStatus||'',resolutionNote:item.resolutionNote||''}));
+  return (Array.isArray(ticket?.staffAssignments)?ticket.staffAssignments:[]).map(item=>({id:item.id,unitId:item.unitId,unitLabel:item.unitLabel,officerFirstName:item.officerFirstName||'',officerMiddleName:item.officerMiddleName||'',officerLastName:item.officerLastName||'',officerName:item.officerName,officerEmail:item.officerEmail,assignedBy:item.assignedBy,assignedAt:item.assignedAt,expiresAt:item.expiresAt,state:supportAssignmentState(item),openedAt:item.openedAt||null,resolvedAt:item.resolvedAt||null,resolvedBy:item.resolvedBy||'',emailStatus:item.emailStatus||'',resolutionNote:item.resolutionNote||'',completionSource:item.completionSource||'',stateHistory:Array.isArray(item.stateHistory)?item.stateHistory:[],supersededAt:item.supersededAt||null,supersededBy:item.supersededBy||''}));
 }
 function supportAssignmentForToken(tickets, token) {
   const tokenHash = hashOneTimeToken(token);
@@ -2096,6 +2235,7 @@ function supportPublicTicket(ticket) {
     language: ticket.language || 'en',
     notificationPreference: ticket.notificationPreference || 'email',
     staffAssignment:{key:staffAssignment.key,label:staffAssignment.label,colour:staffAssignment.colour,unitLabel:staffAssignment.unitLabel,openedAt:staffAssignment.openedAt,resolvedAt:staffAssignment.resolvedAt},
+    finalDecision: supportDecisionSummary(ticket, false),
     sla: supportSlaSummary(ticket),
     updates: (ticket.studentUpdates || []).slice(-12)
   };
@@ -2108,11 +2248,15 @@ function supportTicketPayload(req) {
   const priorityKey = Object.prototype.hasOwnProperty.call(SUPPORT_PRIORITIES, String(req.body?.priority || '').trim())
     ? String(req.body.priority).trim() : 'normal';
   const priority = SUPPORT_PRIORITIES[priorityKey];
-  const name = cleanHumanText(req.body?.name).slice(0, 160);
+  const firstName = cleanHumanText(req.body?.firstName).slice(0, 100);
+  const middleName = cleanHumanText(req.body?.middleName).slice(0, 100);
+  const lastName = cleanHumanText(req.body?.lastName).slice(0, 100);
+  const name = (buildDisplayName('', firstName, middleName, lastName) || cleanHumanText(req.body?.name)).slice(0, 200);
   const email = String(req.body?.email || '').trim().toLowerCase();
   const subject = cleanHumanText(req.body?.subject).slice(0, 220);
   const description = String(req.body?.description || '').trim().slice(0, 10000);
-  const studyCentre = cleanHumanText(req.body?.studyCentre).slice(0, 180);
+  const studyCentres = textList(req, 'studyCentre').map(item => item.slice(0, 180));
+  const studyCentre = studyCentres.join(' | ').slice(0, 360);
   const studentNumber = cleanHumanText(req.body?.studentNumber).slice(0, 100);
   const phone = cleanHumanText(req.body?.phone).slice(0, 40);
   const language = Object.prototype.hasOwnProperty.call(SUPPORT_LANGUAGES, String(req.body?.language || '').trim()) ? String(req.body.language).trim() : 'en';
@@ -2122,7 +2266,7 @@ function supportTicketPayload(req) {
   const studyLevelKey = Object.prototype.hasOwnProperty.call(SUPPORT_STUDY_LEVELS, String(req.body?.studyLevel || '').trim())
     ? String(req.body.studyLevel).trim() : 'other';
   const sensitive = categoryKey === 'sensitive' || String(req.body?.sensitive || '') === 'true';
-  return { type, categoryKey, category, priorityKey, priority, name, email, subject, description, studyCentre, studentNumber, phone, language, notificationPreference, programme, academicDepartment, studyLevelKey, studyLevelLabel: SUPPORT_STUDY_LEVELS[studyLevelKey], sensitive };
+  return { type, categoryKey, category, priorityKey, priority, firstName, middleName, lastName, name, email, subject, description, studyCentres, studyCentre, studentNumber, phone, language, notificationPreference, programme, academicDepartment, studyLevelKey, studyLevelLabel: SUPPORT_STUDY_LEVELS[studyLevelKey], sensitive };
 }
 function supportNormaliseMobile(value) {
   const raw = String(value || '').trim().replace(/^whatsapp:/i, '');
@@ -2283,9 +2427,13 @@ app.post('/api/support/tickets', supportRateLimit(12), supportUpload.array('evid
   try {
     const payload = supportTicketPayload(req);
     if (String(req.body?.website || '').trim()) { await removeUploaded(req).catch(() => {}); return res.status(400).json({ error: 'The submission could not be verified.' }); }
-    if (!payload.name || !payload.email || !payload.subject || !payload.description) {
-      return res.status(400).json({ error: 'Name, email, subject and description are required.' });
+    if ((payload.firstName || payload.middleName || payload.lastName) && (!payload.firstName || !payload.lastName)) {
+      return res.status(400).json({ error: 'Enter both the student’s first name and surname.' });
     }
+    if (!payload.name || !payload.email || !payload.subject || !payload.description) {
+      return res.status(400).json({ error: 'First name, surname, email, subject and description are required.' });
+    }
+    if (payload.studyCentres.length > 1) return res.status(400).json({ error: 'Select only one study centre for a student complaint or request.' });
     if (!isEmail(payload.email)) return res.status(400).json({ error: 'Enter a valid email address.' });
     const requestedMobile = payload.notificationPreference === 'email-sms' ? 'sms' : payload.notificationPreference === 'email-whatsapp' ? 'whatsapp' : '';
     if (requestedMobile && !supportMobileChannelConfigured(requestedMobile)) return res.status(400).json({ error: `${requestedMobile === 'sms' ? 'SMS' : 'WhatsApp'} notifications are not available. Choose email notifications.` });
@@ -2306,6 +2454,7 @@ app.post('/api/support/tickets', supportRateLimit(12), supportUpload.array('evid
     const submittingStaff = staffSessionIdentity(req);
     const submittingUnits = normalizeStaffUnits(submittingStaff?.units);
     const assisted = submittingUnits.some(unit => ['coordinator','regional-administrator'].includes(unit));
+    if (assisted && !payload.studyCentres.length) return res.status(400).json({ error: 'Select the affected student’s study centre.' });
     const responsibleUnitId = payload.sensitive ? 'confidential-handler' : (payload.category.suggestedUnit || 'student-support');
     const responsibleUnitLabel = STAFF_UNITS[responsibleUnitId]?.label || STAFF_UNITS['student-support'].label;
     const supportRegistration = { id:crypto.randomUUID(), sourceUnit:'student', sourceLabel:'Student submission', targetUnit:'student-support', targetLabel:STAFF_UNITS['student-support'].label, comment:'Automatically registered with Student Support Services for acknowledgement, monitoring and follow-up.', status:responsibleUnitId==='student-support'?'assigned':'oversight', origin:'automatic-dual-registration', createdAt:now, reassignmentHistory:[] };
@@ -2314,8 +2463,9 @@ app.post('/api/support/tickets', supportRateLimit(12), supportUpload.array('evid
       id: crypto.randomUUID(), reference: supportReference(), type: payload.type,
       categoryKey: payload.categoryKey || 'general', categoryLabel: payload.category.label,
       priorityKey: payload.priorityKey, priorityLabel: payload.priority.label,
+      firstName:payload.firstName, middleName:payload.middleName, lastName:payload.lastName,
       name: payload.name, email: payload.email, phone: payload.phone, language: payload.language, notificationPreference: payload.notificationPreference,
-      studentNumber: payload.studentNumber, studyCentre: payload.studyCentre,
+      studentNumber: payload.studentNumber, studyCentre: payload.studyCentre, studyCentres:payload.studyCentres,
       programme: payload.programme, academicDepartment: payload.academicDepartment,
       studyLevel: payload.studyLevelKey, studyLevelLabel: payload.studyLevelLabel,
       subject: payload.subject, description: payload.description,
@@ -2449,6 +2599,8 @@ app.post('/api/support/tickets/:reference/decision', supportRateLimit(12), async
     const now = new Date().toISOString();
     ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
     ticket.studentUpdates = Array.isArray(ticket.studentUpdates) ? ticket.studentUpdates : [];
+    if (action === 'reopen' && ticket.studentResponseDueAt && new Date(ticket.studentResponseDueAt).getTime() < Date.now()) { updated = 'window-expired'; return ticket; }
+    if (action === 'reopen' || action === 'appeal') supportArchiveDecision(ticket, { at:now, by:'Student', reason });
     if (action === 'accept') {
       ticket.status = 'accepted';
       ticket.acceptedAt = now;
@@ -2456,7 +2608,6 @@ app.post('/api/support/tickets/:reference/decision', supportRateLimit(12), async
       ticket.studentUpdates.push({ label: 'Resolution accepted', message: 'You accepted the resolution and the case is now closed.', at: now });
       ticket.auditTrail.push({ action: 'Resolution accepted and case closed', note: reason, at: now, by: 'Student' });
     } else if (action === 'reopen') {
-      if (ticket.studentResponseDueAt && new Date(ticket.studentResponseDueAt).getTime() < Date.now()) { updated = 'window-expired'; return ticket; }
       ticket.status = 'reopened';
       ticket.reopenedAt = now;
       ticket.studentResponseDueAt = null;
@@ -2565,12 +2716,12 @@ app.get('/api/support/admin/tickets', supportWorkspaceAuth, async (req, res) => 
   const start = (page - 1) * pageSize;
   const pageTickets = tickets.slice(start, start + pageSize);
   res.json({ ok: true, total, permissionTotal, page, pageSize, pages: Math.max(1, Math.ceil(total / pageSize)), tickets: pageTickets.map(ticket => ({
-    id: ticket.id, reference: ticket.reference, name: ticket.name, email: ticket.email, phone:ticket.phone || '', type: ticket.type, studyLevel: ticket.studyLevelLabel || '', language:ticket.language || 'en', notificationPreference:ticket.notificationPreference || 'email',
+    id: ticket.id, reference: ticket.reference, name: ticket.name, firstName:ticket.firstName || '', middleName:ticket.middleName || '', lastName:ticket.lastName || '', email: ticket.email, phone:ticket.phone || '', type: ticket.type, studyLevel: ticket.studyLevelLabel || '', language:ticket.language || 'en', notificationPreference:ticket.notificationPreference || 'email',
     categoryKey: ticket.categoryKey, category: ticket.categoryLabel, priority: ticket.priorityLabel, status: ticket.status, statusLabel: SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,
     priorityKey: ticket.priorityKey, ownerUnit: ticket.ownerUnit, ownerUnitId: ticket.ownerUnitId || '', assignedCaseOwner: ticket.assignedCaseOwner || '', intendedUnit: ticket.intendedUnit || '', supportUnit: ticket.supportUnit, studyCentre: ticket.studyCentre, programme: ticket.programme || '', academicDepartment: ticket.academicDepartment || '', subject: ticket.subject,
     description: ticket.description, originRole: ticket.originRole, sensitive: ticket.sensitive, createdAt: ticket.createdAt,
-    dueAt: ticket.dueAt, assignmentDueAt: ticket.assignmentDueAt || null, lastUpdatedAt: ticket.lastUpdatedAt, resolution: ticket.resolution || '', feedback: ticket.feedback || null, sla: supportSlaSummary(ticket), assignment:supportAssignmentSummary(ticket,[ticket.ownerUnitId]), assignments:supportAssignmentList(ticket), auditTrail: ticket.auditTrail || [], studentUpdates:ticket.studentUpdates||[],
-    evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [], officerEvidence: Array.isArray(ticket.officerEvidence) ? ticket.officerEvidence : [], forwardHistory: ticket.forwardHistory || [], referrals: ticket.referrals || [], registrations: ticket.registrations || [], interUnitMessages: ticket.interUnitMessages || []
+    dueAt: ticket.dueAt, assignmentDueAt: ticket.assignmentDueAt || null, lastUpdatedAt: ticket.lastUpdatedAt, resolution: ticket.resolution || '', finalDecision:supportDecisionSummary(ticket), decisionHistory:ticket.decisionHistory || [], feedback: ticket.feedback || null, sla: supportSlaSummary(ticket), assignment:supportAssignmentSummary(ticket,[ticket.ownerUnitId]), assignments:supportAssignmentList(ticket), auditTrail: ticket.auditTrail || [], studentUpdates:ticket.studentUpdates||[],
+    evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [], officerEvidence: Array.isArray(ticket.officerEvidence) ? ticket.officerEvidence : [], forwardHistory: ticket.forwardHistory || [], referrals: ticket.referrals || [], registrations: ticket.registrations || [], routingHistory:ticket.routingHistory || [], routingState:supportRegistrationSummary(ticket,['student-support']), interUnitMessages: ticket.interUnitMessages || []
   })) });
 });
 function supportCsvValue(value) {
@@ -2580,17 +2731,10 @@ function supportCsvValue(value) {
 }
 app.get('/api/support/admin/tickets.csv', supportWorkspaceAuth, async (req, res) => {
   const tickets = filterSupportAdminTickets(await readSupportTickets(), req.supportIdentity, req.query);
-  const headers = ['Reference','Created','Last updated','Status','Priority','Category','Matter type','Confidentiality','Student','Email','Phone','Student number','Study centre','Programme','Responsible unit','Assignment indicator','Assigned staff','Assigned staff email','Assignment sent','Assignment opened','Assignment resolved','Due','SLA','First response hours','Resolution hours','Feedback rating','Ease of use','Communication','Timeliness','Staff courtesy','Feedback resolved','Notification preference','Assistance language'];
-  const hours = (start, end) => start && end ? Math.max(0, (new Date(end).getTime() - new Date(start).getTime()) / 3600000).toFixed(1) : '';
-  const rows = tickets.map(ticket => {
-    const sla = supportSlaSummary(ticket);
-    const assignment = supportAssignmentSummary(ticket,[ticket.ownerUnitId]);
-    const slaLabel = sla.overdue ? 'Overdue' : sla.atRisk ? 'At risk' : sla.paused ? 'Paused' : 'On track';
-    return [ticket.reference,ticket.createdAt,ticket.lastUpdatedAt,SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,ticket.priorityLabel,ticket.categoryLabel,ticket.type,ticket.sensitive ? 'Restricted' : 'Standard',ticket.name,ticket.email,ticket.phone,ticket.studentNumber,ticket.studyCentre,ticket.programme,ticket.ownerUnit,assignment.label,assignment.officerName || ticket.assignedCaseOwner,assignment.officerEmail,assignment.assignedAt,assignment.openedAt,assignment.resolvedAt,ticket.dueAt,slaLabel,hours(ticket.createdAt,ticket.firstResponseAt),hours(ticket.createdAt,ticket.resolvedAt),ticket.feedback?.rating || '',ticket.feedback?.easeOfUse || '',ticket.feedback?.communication || '',ticket.feedback?.timeliness || '',ticket.feedback?.staffCourtesy || '',ticket.feedback?.resolved || '',ticket.notificationPreference || 'email',SUPPORT_LANGUAGES[ticket.language] || SUPPORT_LANGUAGES.en].map(supportCsvValue).join(',');
-  });
+  const rows = supportRegisterAoA(tickets).map(row => row.map(supportCsvValue).join(','));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="student-support-cases-${supportDateKey(new Date())}.csv"`);
-  res.send(`\uFEFF${[headers.map(supportCsvValue).join(','), ...rows].join('\r\n')}`);
+  res.send(`\uFEFF${rows.join('\r\n')}`);
 });
 app.get('/api/support/admin/tickets.xlsx', supportWorkspaceAuth, async (req, res) => {
   const tickets = filterSupportAdminTickets(await readSupportTickets(), req.supportIdentity, req.query);
@@ -2612,6 +2756,7 @@ app.patch('/api/support/admin/tickets/:id', supportWorkspaceAuth, requireSupport
     if (!ticket) return null;
     if (!canAccessSupportTicket(req.supportIdentity, ticket)) { updated = 'forbidden'; return ticket; }
     const now = new Date().toISOString();
+    const actor = req.supportIdentity?.name || 'Support administrator';
     const classificationChanged = categoryKey && SUPPORT_CATEGORIES[categoryKey] && categoryKey !== ticket.categoryKey;
     const priorityChanged = priorityKey && SUPPORT_PRIORITIES[priorityKey] && priorityKey !== ticket.priorityKey;
     if (classificationChanged) {
@@ -2632,6 +2777,9 @@ app.patch('/api/support/admin/tickets/:id', supportWorkspaceAuth, requireSupport
       ticket.priorityLabel = SUPPORT_PRIORITIES[priorityKey].label;
     }
     if ((classificationChanged || priorityChanged) && !ticket.slaPausedAt) ticket.dueAt = supportMoveWorkingDays(now, supportDueDays(ticket.categoryKey, ticket.priorityKey, ticket.sensitive));
+    if (SUPPORT_TERMINAL_STATUSES.has(ticket.status) && !SUPPORT_TERMINAL_STATUSES.has(nextStatus)) {
+      supportArchiveDecision(ticket, { at:now, by:actor, reason:note || `Case moved to ${SUPPORT_STATUS_LABELS[nextStatus]}.` });
+    }
     ticket.status = nextStatus;
     if (ownerUnitId && Object.prototype.hasOwnProperty.call(STAFF_UNITS, ownerUnitId)) {
       if (ticket.sensitive && !['confidential-handler','provost'].includes(ownerUnitId)) { updated = 'restricted-route'; return ticket; }
@@ -2642,12 +2790,21 @@ app.patch('/api/support/admin/tickets/:id', supportWorkspaceAuth, requireSupport
     if (!ticket.firstResponseAt && nextStatus !== 'received') ticket.firstResponseAt = now;
     if (['evidence-requested','lacks-evidence','awaiting-student'].includes(nextStatus)) supportPauseSla(ticket, note || 'Awaiting student information');
     else if (ticket.slaPausedAt) supportResumeSla(ticket);
-    if (['resolved','final-decision','closed'].includes(nextStatus)) ticket.studentResponseDueAt = supportMoveWorkingDays(now, 5);
+    let completedAssignments = 0;
+    if (['resolved','final-decision','closed'].includes(nextStatus)) {
+      ticket.studentResponseDueAt = supportMoveWorkingDays(now, 5);
+      ticket.resolvedAt = now;
+      ticket.resolvedBy = actor;
+      if (note) completedAssignments = supportCompleteCurrentAssignments(ticket, { narrative:note, actor, at:now, status:nextStatus, source:'student-support-decision' });
+    }
     if (nextStatus === 'reopened') ticket.studentResponseDueAt = null;
     if (note) ticket.resolution = ['resolved','final-decision','closed'].includes(nextStatus) ? note : ticket.resolution || '';
     ticket.lastUpdatedAt = now;
     ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
-    ticket.auditTrail.push({ action: `Status changed to ${SUPPORT_STATUS_LABELS[nextStatus]}`, note, at: now, by: req.supportIdentity?.name || 'Support administrator' });
+    const colourNote = completedAssignments
+      ? `${note}${note ? ' ' : ''}${completedAssignments} active staff assignment indicator${completedAssignments === 1 ? '' : 's'} changed to green in all authorised registers.`
+      : note;
+    ticket.auditTrail.push({ action: `Status changed to ${SUPPORT_STATUS_LABELS[nextStatus]}`, note:colourNote, at: now, by:actor, indicatorColour:['resolved','final-decision','closed'].includes(nextStatus)?'green':'' });
     ticket.studentUpdates=Array.isArray(ticket.studentUpdates)?ticket.studentUpdates:[];
     ticket.studentUpdates.push({label:SUPPORT_STATUS_LABELS[nextStatus],message:note||`Your case status is now ${SUPPORT_STATUS_LABELS[nextStatus]}.`,at:now});
     if (ticket.auditTrail.length > 100) ticket.auditTrail = ticket.auditTrail.slice(-100);
@@ -2735,19 +2892,41 @@ function supportEmailsAreInstitutional(emails) {
     return [...SUPPORT_ALLOWED_EMAIL_DOMAINS].some(allowed => domain === allowed || domain.endsWith(`.${allowed}`));
   });
 }
+function supportAssignmentFailureReason(error) {
+  const message = String(error?.message || error || '');
+  if (/SQLITE_BUSY|database is locked/i.test(message)) return 'The complaint register is busy. Wait a moment and try the assignment again.';
+  if (/ENOSPC|disk.*full|database or disk is full/i.test(message)) return 'The portal storage is full, so the staff account or assignment could not be saved. Ask the developer to check persistent storage.';
+  if (/EACCES|EPERM|EROFS|readonly|read-only/i.test(message)) return 'The portal could not save the staff account or assignment. Ask the developer to check the persistent-storage permissions.';
+  return 'The portal could not confirm the staff assignment. Refresh the register before trying again. If no assignment appears, retry or contact the developer.';
+}
+function supportAssignmentEmailFailureReason(error) {
+  const message = String(error?.message || error || '');
+  if (/invalid_grant|access token|oauth|unauthenticated|invalid credentials/i.test(message)) return 'The Gmail connection needs to be renewed by the developer.';
+  if (/permission|forbidden|insufficient|not authorized/i.test(message)) return 'The configured Gmail account is not authorised to send this message.';
+  if (/recipient|address.*invalid|invalid.*address/i.test(message)) return 'The receiving email address was rejected. Check and correct the address.';
+  if (/fetch failed|network|timed?\s*out|temporar/i.test(message)) return 'The email service could not be reached. Try again later or share the secure link manually.';
+  return 'The email service rejected the message. Ask the developer to check the saved email-delivery error.';
+}
 async function createSupportStaffAssignment(req, res, { identity, allowedUnits }) {
+ try {
   const unitId = String(req.body?.unitId || '').trim();
   const officerEmail = String(req.body?.officerEmail || '').trim().toLowerCase();
-  const officerName = cleanHumanText(req.body?.officerName || '').slice(0, 180);
+  const officerFirstName = cleanHumanText(req.body?.officerFirstName || '').slice(0, 100);
+  const officerMiddleName = cleanHumanText(req.body?.officerMiddleName || '').slice(0, 100);
+  const officerLastName = cleanHumanText(req.body?.officerLastName || '').slice(0, 100);
+  const officerName = (buildDisplayName('', officerFirstName, officerMiddleName, officerLastName) || cleanHumanText(req.body?.officerName || '')).slice(0, 200);
   const units = normalizeStaffUnits(allowedUnits);
   if (!STAFF_UNITS[unitId] || !units.includes(unitId)) return res.status(403).json({ error:'You may assign staff only for a functional unit you administer.' });
+  if ((officerFirstName || officerMiddleName || officerLastName) && (!officerFirstName || !officerLastName)) return res.status(400).json({ error:'Enter both the staff member’s first name and surname.' });
   if (!isEmail(officerEmail)) return res.status(400).json({ error:'Enter a valid staff email address.' });
   if (!supportEmailsAreInstitutional([officerEmail])) return res.status(400).json({ error:'Use an approved institutional staff email address.' });
   const availableTicket = (await readSupportTickets()).find(ticket => ticket.id === req.params.id && (ticket.ownerUnitId === unitId || activeReferralForUnits(ticket,[unitId])));
   if (!availableTicket) return res.status(404).json({ error:'This complaint or request is not registered with the selected functional unit.' });
+  if (SUPPORT_TERMINAL_STATUSES.has(availableTicket.status)) return res.status(409).json({ error:'This complaint or request already has a completed decision. Reopen or reassign it before creating another staff assignment.' });
   if (availableTicket.sensitive && !['confidential-handler','provost'].includes(unitId)) return res.status(403).json({ error:'This restricted complaint cannot be assigned through the selected functional unit.' });
   const actor = identity?.name || identity?.username || 'Functional-unit administrator';
-  const accountSetup = await ensureSupportAssignmentAccount({ email:officerEmail, name:officerName, unitId, actor });
+  if (!officerName) return res.status(400).json({ error:'Enter the staff member’s first name and surname.' });
+  const accountSetup = await ensureSupportAssignmentAccount({ email:officerEmail, name:officerName, firstName:officerFirstName, middleName:officerMiddleName, lastName:officerLastName, unitId, actor });
   if (!accountSetup || accountSetup.state === 'disabled') return res.status(409).json({ error:'This staff account is suspended. Reactivate it in the Developer Portal before assigning a complaint or request.' });
   const rawToken = crypto.randomBytes(32).toString('hex');
   const assignmentId = crypto.randomUUID();
@@ -2761,19 +2940,20 @@ async function createSupportStaffAssignment(req, res, { identity, allowedUnits }
     ticket.staffAssignments = Array.isArray(ticket.staffAssignments) ? ticket.staffAssignments : [];
     for (const assignment of ticket.staffAssignments) {
       if (assignment.unitId === unitId && !['resolved','superseded'].includes(assignment.state)) {
+        supportAppendAssignmentTransition(assignment, { colour:'blue', label:'Assignment superseded', narrative:`A new assignment was created for ${officerEmail}.`, at:now, by:actor, source:'staff-reassignment' });
         assignment.state = 'superseded';
         assignment.supersededAt = now;
         assignment.supersededBy = actor;
       }
     }
-    ticket.staffAssignments.push({ id:assignmentId, unitId, unitLabel:STAFF_UNITS[unitId].label, officerName:officerName || accountSetup.account.name || officerEmail.split('@')[0], officerEmail, staffAccountId:accountSetup.account.id, accountCreated:Boolean(accountSetup.created), activationRequired:accountSetup.state==='pending', assignedBy:actor, assignedAt:now, expiresAt, tokenHash:hashOneTimeToken(rawToken), state:'unopened', emailStatus:'pending', checks:{}, openedAt:null, resolvedAt:null, resolutionNote:'' });
+    ticket.staffAssignments.push({ id:assignmentId, unitId, unitLabel:STAFF_UNITS[unitId].label, officerFirstName, officerMiddleName, officerLastName, officerName:officerName || accountSetup.account.name || officerEmail.split('@')[0], officerEmail, staffAccountId:accountSetup.account.id, accountCreated:Boolean(accountSetup.created), activationRequired:accountSetup.state==='pending', assignedBy:actor, assignedAt:now, expiresAt, tokenHash:hashOneTimeToken(rawToken), state:'unopened', emailStatus:'pending', checks:{}, openedAt:null, resolvedAt:null, resolutionNote:'', stateHistory:[{ colour:'red', label:'Assigned, not yet opened', narrative:`Assigned to ${officerName || accountSetup.account.name || officerEmail}.`, at:now, by:actor, source:'staff-assignment' }] });
     ticket.assignedCaseOwner = officerName || officerEmail;
     ticket.assignedCaseEmail = officerEmail;
     ticket.assignmentDueAt = supportMoveWorkingDays(now, 2);
     if (!['resolved','final-decision','closed','accepted'].includes(ticket.status)) ticket.status = 'assigned';
     ticket.lastUpdatedAt = now;
     ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
-    ticket.auditTrail.push({ action:`Assigned to ${officerEmail}`, note:`${STAFF_UNITS[unitId].label} staff assignment created. Register indicator is red until the secure link is opened.`, at:now, by:actor });
+    ticket.auditTrail.push({ action:`Assigned to ${officerEmail}`, note:`${STAFF_UNITS[unitId].label} staff assignment created. Register indicator is red until the secure link is opened.`, at:now, by:actor, indicatorColour:'red' });
     assignedTicket = JSON.parse(JSON.stringify(ticket));
     return tickets;
   });
@@ -2782,6 +2962,7 @@ async function createSupportStaffAssignment(req, res, { identity, allowedUnits }
   const activationUrl = accountSetup.invitationToken ? `${requestBaseUrl(req)}/admin-set-password.html?token=${encodeURIComponent(accountSetup.invitationToken)}&next=${encodeURIComponent(new URL(secureUrl).pathname)}` : '';
   let emailStatus = 'not-configured';
   let emailError = '';
+  let emailReason = '';
   if (gmailConfigured()) {
     try {
       const actionUrl = activationUrl || secureUrl;
@@ -2795,6 +2976,7 @@ async function createSupportStaffAssignment(req, res, { identity, allowedUnits }
     } catch (error) {
       emailStatus = 'failed';
       emailError = String(error.message || error).slice(0, 300);
+      emailReason = supportAssignmentEmailFailureReason(error);
     }
   }
   await mutateSupportTickets(tickets => {
@@ -2815,8 +2997,14 @@ async function createSupportStaffAssignment(req, res, { identity, allowedUnits }
   }
   const assignment = supportAssignmentSummary({ staffAssignments:assignedTicket.staffAssignments }, [unitId]);
   const accountMessage = accountSetup.created ? 'A permanent Officer account was created automatically.' : accountSetup.unitAdded ? 'The functional unit was added to the existing permanent account.' : accountSetup.state === 'pending' ? 'The existing pending account received a new activation link.' : 'The existing permanent staff account was reused.';
-  const deliveryMessage = emailStatus === 'sent' ? 'The activation or assignment email was sent.' : emailStatus === 'failed' ? 'Email delivery failed. Copy the activation link below or correct the email settings and assign again.' : 'Email delivery is not configured. Copy the activation link below to the staff member.';
-  return res.json({ ok:true, reference:assignedTicket.reference, assignment:{...assignment,emailStatus}, secureUrl, activationUrl:activationUrl && emailStatus!=='sent' ? activationUrl : '', account:{ id:accountSetup.account.id, username:accountSetup.account.username, email:officerEmail, created:Boolean(accountSetup.created), unitAdded:Boolean(accountSetup.unitAdded), activationRequired:accountSetup.state==='pending' }, message:`${accountMessage} ${deliveryMessage}` });
+  const deliveryMessage = emailStatus === 'sent' ? 'The activation or assignment email was sent.' : emailStatus === 'failed' ? `Email delivery failed. ${emailReason} Copy the activation link below instead.` : 'Email delivery is not configured. Copy the activation link below to the staff member.';
+  return res.json({ ok:true, reference:assignedTicket.reference, assignment:{...assignment,emailStatus}, secureUrl, activationUrl:activationUrl && emailStatus!=='sent' ? activationUrl : '', account:{ id:accountSetup.account.id, username:accountSetup.account.username, email:officerEmail, created:Boolean(accountSetup.created), unitAdded:Boolean(accountSetup.unitAdded), activationRequired:accountSetup.state==='pending' }, emailDelivery:{status:emailStatus,reason:emailReason}, message:`${accountMessage} ${deliveryMessage}` });
+ } catch (error) {
+   console.error('Support staff assignment failed:', error);
+   if (res.headersSent) return;
+   const reason = supportAssignmentFailureReason(error);
+   return res.status(500).json({ ok:false, code:'STAFF_ASSIGNMENT_FAILED', error:reason, reason });
+ }
 }
 
 app.post('/api/support/admin/tickets/:id/staff-assignments', supportWorkspaceAuth, requireSupportRole('administrator'), async(req,res)=>{
@@ -2937,21 +3125,37 @@ function activeReferralForUnits(ticket, unitIds) {
     allowed.has(referral.targetUnit) && !['reassigned', 'closed', 'cancelled', 'resolved', 'returned-to-support'].includes(referral.status)
   ) || null;
 }
-async function reassignSupportReferral(ticketId, { targetUnit, note, actor, sourceUnits, allowUnassigned=false }) {
+function supportRegistrationSummary(ticket, unitIds = []) {
+  const units = new Set(normalizeStaffUnits(unitIds));
+  const registrations = (Array.isArray(ticket?.registrations) ? ticket.registrations : []).filter(item => units.has(item.unitId));
+  if (units.has(ticket?.ownerUnitId)) return { key:'active', label:'Current responsible unit', colour:'green', unitId:ticket.ownerUnitId, unitLabel:ticket.ownerUnit, redirectedToUnit:'', redirectedToLabel:'', redirectedAt:null, redirectedBy:'', narrative:'' };
+  const redirected = registrations.filter(item => item.status === 'redirected').sort((a,b) => String(b.redirectedAt || '').localeCompare(String(a.redirectedAt || '')))[0];
+  if (redirected) return { key:'redirected', label:`Redirected to ${redirected.redirectedToLabel || STAFF_UNITS[redirected.redirectedToUnit]?.label || 'another unit'}`, colour:'blue', unitId:redirected.unitId, unitLabel:redirected.unitLabel, redirectedToUnit:redirected.redirectedToUnit || '', redirectedToLabel:redirected.redirectedToLabel || '', redirectedAt:redirected.redirectedAt || null, redirectedBy:redirected.redirectedBy || '', narrative:redirected.redirectNote || '' };
+  const oversight = registrations.find(item => item.role === 'oversight');
+  if (oversight) return { key:'oversight', label:'Oversight registration', colour:'neutral', unitId:oversight.unitId, unitLabel:oversight.unitLabel, redirectedToUnit:'', redirectedToLabel:'', redirectedAt:null, redirectedBy:'', narrative:'This unit retains the complaint or request for monitoring and follow-up.' };
+  return { key:'historical', label:'Historical registration', colour:'neutral', unitId:registrations[0]?.unitId || '', unitLabel:registrations[0]?.unitLabel || '', redirectedToUnit:'', redirectedToLabel:'', redirectedAt:null, redirectedBy:'', narrative:'' };
+}
+async function reassignSupportReferral(ticketId, { targetUnit, note, actor, sourceUnits, allowUnassigned=false, supervisory=false }) {
   let result = { state: 'not-found' };
   await mutateSupportTickets(tickets => {
     const ticket = tickets.find(item => item.id === ticketId);
     if (!ticket) return tickets;
     if (ticket.sensitive && !['confidential-handler','provost'].includes(targetUnit)) { result = { state: 'restricted-route' }; return tickets; }
     ticket.referrals = Array.isArray(ticket.referrals) ? ticket.referrals : [];
-    const current = activeReferralForUnits(ticket, sourceUnits);
+    const current = supervisory
+      ? [...ticket.referrals].reverse().find(referral => referral.targetUnit === ticket.ownerUnitId && !['reassigned','closed','cancelled','returned-to-support'].includes(referral.status)) || null
+      : activeReferralForUnits(ticket, sourceUnits);
     if (!current && !allowUnassigned) { result = { state: 'not-assigned' }; return tickets; }
-    const sourceUnit = current?.targetUnit || 'student-support';
+    const sourceUnit = supervisory ? (ticket.ownerUnitId || current?.targetUnit || 'student-support') : (current?.targetUnit || 'student-support');
     if (sourceUnit === targetUnit) { result = { state: 'same-unit' }; return tickets; }
     const now = new Date().toISOString();
     if (current) {
       current.status = 'reassigned';
       current.reassignedAt = now;
+      current.reassignedBy = actor;
+      current.redirectedToUnit = targetUnit;
+      current.redirectedToLabel = STAFF_UNITS[targetUnit].label;
+      current.redirectReason = note;
       current.reassignmentHistory = Array.isArray(current.reassignmentHistory) ? current.reassignmentHistory : [];
       current.reassignmentHistory.push({ at: now, by: actor, targetUnit, targetLabel: STAFF_UNITS[targetUnit].label, note });
     }
@@ -2962,17 +3166,58 @@ async function reassignSupportReferral(ticketId, { targetUnit, note, actor, sour
     };
     ticket.referrals.push(referral);
     ticket.registrations = Array.isArray(ticket.registrations) ? ticket.registrations : [];
-    if (!ticket.registrations.some(item => item.unitId === targetUnit)) {
-      ticket.registrations.push({ unitId:targetUnit, unitLabel:STAFF_UNITS[targetUnit].label, role:'responsible-unit', registeredAt:now, status:'active' });
+    const sourceRegistration = ticket.registrations.find(item => item.unitId === sourceUnit);
+    if (sourceRegistration) {
+      if (sourceUnit === 'student-support') {
+        sourceRegistration.role = targetUnit === 'student-support' ? 'responsible' : 'oversight';
+        sourceRegistration.status = 'active';
+      } else {
+        sourceRegistration.role = 'previous-responsible-unit';
+        sourceRegistration.status = 'redirected';
+        sourceRegistration.redirectedAt = now;
+        sourceRegistration.redirectedBy = actor;
+        sourceRegistration.redirectedToUnit = targetUnit;
+        sourceRegistration.redirectedToLabel = STAFF_UNITS[targetUnit].label;
+        sourceRegistration.redirectNote = note;
+      }
+    } else if (sourceUnit === 'student-support') {
+      ticket.registrations.push({ unitId:'student-support', unitLabel:STAFF_UNITS['student-support'].label, role:'oversight', registeredAt:ticket.createdAt || now, status:'active' });
+    } else {
+      ticket.registrations.push({ unitId:sourceUnit, unitLabel:STAFF_UNITS[sourceUnit]?.label || sourceUnit, role:'previous-responsible-unit', registeredAt:ticket.createdAt || now, status:'redirected', redirectedAt:now, redirectedBy:actor, redirectedToUnit:targetUnit, redirectedToLabel:STAFF_UNITS[targetUnit].label, redirectNote:note });
+    }
+    const targetRegistration = ticket.registrations.find(item => item.unitId === targetUnit);
+    if (targetRegistration) {
+      targetRegistration.role = targetUnit === 'student-support' ? 'responsible' : 'responsible-unit';
+      targetRegistration.status = 'active';
+      targetRegistration.reactivatedAt = now;
+      delete targetRegistration.redirectedAt;
+      delete targetRegistration.redirectedBy;
+      delete targetRegistration.redirectedToUnit;
+      delete targetRegistration.redirectedToLabel;
+      delete targetRegistration.redirectNote;
+    } else {
+      ticket.registrations.push({ unitId:targetUnit, unitLabel:STAFF_UNITS[targetUnit].label, role:targetUnit === 'student-support' ? 'responsible' : 'responsible-unit', registeredAt:now, status:'active' });
+    }
+    const supportRegistration = ticket.registrations.find(item => item.unitId === 'student-support');
+    if (supportRegistration) {
+      supportRegistration.status = 'active';
+      supportRegistration.role = targetUnit === 'student-support' ? 'responsible' : 'oversight';
+    } else {
+      ticket.registrations.push({ unitId:'student-support', unitLabel:STAFF_UNITS['student-support'].label, role:targetUnit === 'student-support' ? 'responsible' : 'oversight', registeredAt:ticket.createdAt || now, status:'active' });
     }
     ticket.staffAssignments = Array.isArray(ticket.staffAssignments) ? ticket.staffAssignments : [];
     for (const assignment of ticket.staffAssignments) {
       if (assignment.unitId === sourceUnit && !['resolved','superseded'].includes(assignment.state)) {
+        supportAppendAssignmentTransition(assignment, { colour:'blue', label:'Case redirected', narrative:`Redirected to ${STAFF_UNITS[targetUnit].label}. ${note}`, at:now, by:actor, source:'unit-redirection' });
         assignment.state = 'superseded';
         assignment.supersededAt = now;
         assignment.supersededBy = actor;
       }
     }
+    ticket.routingHistory = Array.isArray(ticket.routingHistory) ? ticket.routingHistory : [];
+    ticket.routingHistory.push({ fromUnit:sourceUnit, fromLabel:STAFF_UNITS[sourceUnit]?.label || sourceUnit, toUnit:targetUnit, toLabel:STAFF_UNITS[targetUnit].label, note, at:now, by:actor });
+    if (ticket.routingHistory.length > 50) ticket.routingHistory = ticket.routingHistory.slice(-50);
+    if (supportDecisionSummary(ticket)?.narrative) supportArchiveDecision(ticket, { at:now, by:actor, reason:note });
     ticket.ownerUnit = STAFF_UNITS[targetUnit].label;
     ticket.ownerUnitId = targetUnit;
     ticket.assignedCaseOwner = '';
@@ -2980,11 +3225,11 @@ async function reassignSupportReferral(ticketId, { targetUnit, note, actor, sour
     ticket.status = 'assigned';
     ticket.lastUpdatedAt = now;
     ticket.auditTrail = Array.isArray(ticket.auditTrail) ? ticket.auditTrail : [];
-    ticket.auditTrail.push({ action: `Case reassigned from ${STAFF_UNITS[sourceUnit]?.label || sourceUnit} to ${STAFF_UNITS[targetUnit].label}`, note, at: now, by: actor });
+    ticket.auditTrail.push({ action: `Case reassigned from ${STAFF_UNITS[sourceUnit]?.label || sourceUnit} to ${STAFF_UNITS[targetUnit].label}`, note, at: now, by: actor, indicatorColour:'blue' });
     ticket.studentUpdates = Array.isArray(ticket.studentUpdates) ? ticket.studentUpdates : [];
     ticket.studentUpdates.push({ label: 'Case reassigned', message: `Your case has been reassigned to ${STAFF_UNITS[targetUnit].label} for continued action.`, at: now });
     if (ticket.auditTrail.length > 100) ticket.auditTrail = ticket.auditTrail.slice(-100);
-    result = { state: 'ok', ticket: JSON.parse(JSON.stringify(ticket)), referral };
+    result = { state: 'ok', ticket: JSON.parse(JSON.stringify(ticket)), referral, sourceUnit, sourceLabel:STAFF_UNITS[sourceUnit]?.label || sourceUnit };
     return ticket;
   });
   return result;
@@ -2995,14 +3240,14 @@ function reassignSupportReferralResponse(result, res, req) {
   if (result.state === 'same-unit') return res.status(400).json({ error: 'Choose a different functional unit for reassignment.' });
   if (result.state === 'restricted-route') return res.status(400).json({ error: 'Sensitive cases may only be reassigned to the Confidential Case Handler or Provost.' });
   sendSupportStudentUpdateEmail(result.ticket, { label: 'Case reassigned', message: `Your case has been reassigned to ${result.referral.targetLabel} for continued action.` }, req).catch(error => console.error('Support reassignment email failed:', error.message));
-  return res.json({ ok: true, reference: result.ticket.reference, referral: result.referral });
+  return res.json({ ok: true, reference: result.ticket.reference, referral: result.referral, previousUnit:{ id:result.sourceUnit, label:result.sourceLabel }, routingHistory:result.ticket.routingHistory || [] });
 }
 app.post('/api/support/admin/tickets/:id/reassign', supportWorkspaceAuth, requireSupportRole('officer'), async (req, res) => {
   const targetUnit = String(req.body?.targetUnit || '').trim();
   const note = String(req.body?.note || '').trim().slice(0, 2000);
   if (!Object.prototype.hasOwnProperty.call(STAFF_UNITS, targetUnit)) return res.status(400).json({ error: 'Select the receiving functional unit.' });
   if (!note) return res.status(400).json({ error: 'Provide reassignment comments for the receiving unit.' });
-  const result = await reassignSupportReferral(req.params.id, { targetUnit, note, actor: req.supportIdentity?.name || 'Student Support Services', sourceUnits: ['student-support'], allowUnassigned: true });
+  const result = await reassignSupportReferral(req.params.id, { targetUnit, note, actor: req.supportIdentity?.name || 'Student Support Services', sourceUnits: ['student-support'], allowUnassigned: true, supervisory:true });
   return reassignSupportReferralResponse(result, res, req);
 });
 
@@ -3035,7 +3280,7 @@ app.get('/secure/support-assignment/:token', secureSupportAssignmentAuth, async(
   if(new Date(match.assignment.expiresAt).getTime()<=Date.now()&&match.assignment.state!=='resolved')return res.status(410).send('This staff assignment link has expired. Ask the functional-unit administrator to assign the case again.');
   if(match.assignment.state==='unopened'){
     const now=new Date().toISOString();
-    await mutateSupportTickets(tickets=>{const ticket=tickets.find(item=>item.id===match.ticket.id),assignment=ticket?.staffAssignments?.find(item=>item.id===match.assignment.id);if(!ticket||!assignment)return tickets;assignment.state='opened';assignment.openedAt=now;ticket.lastUpdatedAt=now;if(ticket.ownerUnitId===assignment.unitId&&!['resolved','final-decision','closed','accepted'].includes(ticket.status))ticket.status='in-progress';const referral=[...(ticket.referrals||[])].reverse().find(item=>item.targetUnit===assignment.unitId&&!['reassigned','resolved','closed'].includes(item.status));if(referral){referral.status='opened';referral.openedAt=now;}ticket.auditTrail=Array.isArray(ticket.auditTrail)?ticket.auditTrail:[];ticket.auditTrail.push({action:`Assignment opened by ${assignment.officerEmail}`,note:'Register indicator changed from red to yellow.',at:now,by:assignment.officerName||assignment.officerEmail});return tickets;});
+    await mutateSupportTickets(tickets=>{const ticket=tickets.find(item=>item.id===match.ticket.id),assignment=ticket?.staffAssignments?.find(item=>item.id===match.assignment.id);if(!ticket||!assignment)return tickets;assignment.state='opened';assignment.openedAt=now;supportAppendAssignmentTransition(assignment,{colour:'yellow',label:'Opened by assigned staff',narrative:'The assigned staff member opened the secure case workspace.',at:now,by:assignment.officerName||assignment.officerEmail,source:'secure-assignment-open'});ticket.lastUpdatedAt=now;if(ticket.ownerUnitId===assignment.unitId&&!['resolved','final-decision','closed','accepted'].includes(ticket.status))ticket.status='in-progress';const referral=[...(ticket.referrals||[])].reverse().find(item=>item.targetUnit===assignment.unitId&&!['reassigned','resolved','closed'].includes(item.status));if(referral){referral.status='opened';referral.openedAt=now;}ticket.auditTrail=Array.isArray(ticket.auditTrail)?ticket.auditTrail:[];ticket.auditTrail.push({action:`Assignment opened by ${assignment.officerEmail}`,note:'Register indicator changed from red to yellow.',at:now,by:assignment.officerName||assignment.officerEmail,indicatorColour:'yellow'});return tickets;});
     match.assignment.state='opened';match.assignment.openedAt=now;
   }
   res.setHeader('Cache-Control','no-store');
@@ -3050,7 +3295,7 @@ app.post('/secure/support-assignment/:token/resolve', secureSupportAssignmentAut
   if(!found||found.assignment.state==='superseded')return res.status(404).send('This staff assignment link is unavailable.');
   if(new Date(found.assignment.expiresAt).getTime()<=Date.now()&&found.assignment.state!=='resolved')return res.status(410).send('This staff assignment link has expired.');
   const now=new Date().toISOString();let updated=null,isResponsible=false;
-  await mutateSupportTickets(tickets=>{const ticket=tickets.find(item=>item.id===found.ticket.id),assignment=ticket?.staffAssignments?.find(item=>item.id===found.assignment.id);if(!ticket||!assignment)return tickets;assignment.state='resolved';assignment.resolvedAt=assignment.resolvedAt||now;assignment.checks=checks;assignment.resolutionNote=resolutionNote;ticket.lastUpdatedAt=now;isResponsible=ticket.ownerUnitId===assignment.unitId;if(isResponsible){ticket.status='resolved';ticket.resolution=resolutionNote;ticket.resolvedAt=now;ticket.resolvedBy=assignment.officerName||assignment.officerEmail;ticket.studentResponseDueAt=supportMoveWorkingDays(now,5);ticket.studentUpdates=Array.isArray(ticket.studentUpdates)?ticket.studentUpdates:[];ticket.studentUpdates.push({label:'Resolution proposed',message:resolutionNote,at:now});}const referral=[...(ticket.referrals||[])].reverse().find(item=>item.targetUnit===assignment.unitId&&!['reassigned','closed'].includes(item.status));if(referral){referral.status='resolved';referral.resolvedAt=now;}ticket.auditTrail=Array.isArray(ticket.auditTrail)?ticket.auditTrail:[];ticket.auditTrail.push({action:`Assignment resolved by ${assignment.officerEmail}`,note:`Register indicator changed to green. ${resolutionNote}`,at:now,by:assignment.officerName||assignment.officerEmail});updated=JSON.parse(JSON.stringify(ticket));return tickets;});
+  await mutateSupportTickets(tickets=>{const ticket=tickets.find(item=>item.id===found.ticket.id),assignment=ticket?.staffAssignments?.find(item=>item.id===found.assignment.id);if(!ticket||!assignment)return tickets;const actor=assignment.officerName||assignment.officerEmail;assignment.state='resolved';assignment.resolvedAt=assignment.resolvedAt||now;assignment.resolvedBy=actor;assignment.checks=checks;assignment.resolutionNote=resolutionNote;assignment.completionSource='secure-assignment-checklist';supportAppendAssignmentTransition(assignment,{colour:'green',label:'Resolution checklist completed',narrative:resolutionNote,at:now,by:actor,source:'secure-assignment-checklist'});ticket.lastUpdatedAt=now;isResponsible=ticket.ownerUnitId===assignment.unitId;if(isResponsible){ticket.status='resolved';ticket.resolution=resolutionNote;ticket.resolvedAt=now;ticket.resolvedBy=actor;ticket.studentResponseDueAt=supportMoveWorkingDays(now,5);ticket.studentUpdates=Array.isArray(ticket.studentUpdates)?ticket.studentUpdates:[];ticket.studentUpdates.push({label:'Resolution proposed',message:resolutionNote,at:now});}const referral=[...(ticket.referrals||[])].reverse().find(item=>item.targetUnit===assignment.unitId&&!['reassigned','closed'].includes(item.status));if(referral){referral.status='resolved';referral.resolvedAt=now;referral.resolvedBy=actor;referral.resolutionNarrative=resolutionNote;}ticket.auditTrail=Array.isArray(ticket.auditTrail)?ticket.auditTrail:[];ticket.auditTrail.push({action:`Assignment resolved by ${assignment.officerEmail}`,note:`Register indicator changed to green. ${resolutionNote}`,at:now,by:actor,indicatorColour:'green'});updated=JSON.parse(JSON.stringify(ticket));return tickets;});
   if(!updated)return res.status(404).send('This staff assignment link is unavailable.');
   if(isResponsible)sendSupportStudentUpdateEmail(updated,{label:'Resolution proposed',message:resolutionNote},req).catch(error=>console.error('Assigned-staff resolution email failed:',error.message));
   const assignment=updated.staffAssignments.find(item=>item.id===found.assignment.id);
@@ -3088,6 +3333,21 @@ app.get('/secure/support/:token/officer-evidence/:index', async (req, res) => {
   return sendSupportEvidence(req, res, evidence);
 });
 
+app.get('/api/claim-certification/:token', async(req,res)=>{
+  res.setHeader('Cache-Control','no-store');const token=String(req.params.token||'');
+  if(!/^[a-f0-9]{64}$/i.test(token))return res.status(400).json({error:'This claim-certification link is invalid.'});
+  const record=(await readDb()).find(item=>item?.claimantCertification?.tokenHash===hashOneTimeToken(token));
+  if(!record)return res.status(404).json({error:'This claim-certification link is invalid or has already been used.'});
+  const certification=record.claimantCertification;if(certification.expiresAt&&new Date(certification.expiresAt).getTime()<=Date.now())return res.status(410).json({error:'This claim-certification link has expired. Ask the department to send a new one.'});
+  res.json({ok:true,reference:record.reference,departmentName:record.departmentName,claimantName:certification.claimantName||record.fullName||record.assessorName||'',claimantEmail:certification.claimantEmail||record.email||'',staffId:certification.staffId||'',declarationText:certification.declarationText||CLAIMANT_DECLARATION,declaredAt:certification.declaredAt,expiresAt:certification.expiresAt});
+});
+app.post('/api/claim-certification/:token/confirm', async(req,res)=>{
+  if(!declarationAccepted(req.body?.declarationAccepted))return res.status(400).json({error:'Tick the declaration before certifying this claim.'});
+  const token=String(req.params.token||'');if(!/^[a-f0-9]{64}$/i.test(token))return res.status(400).json({error:'This claim-certification link is invalid.'});
+  const now=new Date().toISOString(),result=await mutateDb(records=>{const record=records.find(item=>item?.claimantCertification?.tokenHash===hashOneTimeToken(token));if(!record)return {error:'This claim-certification link is invalid or has already been used.',status:404};const certification=record.claimantCertification;if(certification.expiresAt&&new Date(certification.expiresAt).getTime()<=Date.now())return {error:'This claim-certification link has expired. Ask the department to send a new one.',status:410};certification.status='verified';certification.verifiedAt=now;certification.verificationChannel='verified-email-link';certification.tokenHash=null;certification.expiresAt=null;certification.history=Array.isArray(certification.history)?certification.history:[];certification.history.push({action:'claim-electronically-certified',at:now,channel:'verified-email-link'});return {ok:true,reference:record.reference,claimantName:certification.claimantName,verifiedAt:now};});
+  if(result.error)return res.status(result.status||400).json({error:result.error});res.json(result);
+});
+
 // 1. UNDERGRADUATE PROJECT WORK
 app.post('/api/project-work', upload.fields([
   { name: 'claimForm', maxCount: 1 }, { name: 'reportFile', maxCount: 1 },
@@ -3098,6 +3358,8 @@ app.post('/api/project-work', upload.fields([
     if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
     const missing = requireText(req, ['title','firstName','lastName','phone','email','groupCount']);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error: `Missing required field: ${missing}` }); }
+    if(!isEmail(text(req,'email'))){await removeUploaded(req);return res.status(400).json({error:'Enter a valid claimant email address.'});}
+    if(!declarationAccepted(req.body?.claimantDeclaration)){await removeUploaded(req);return res.status(400).json({error:'Tick the claimant declaration before submitting the claim.'});}
     const selectedCentres=textList(req,'studyCentre');
     if(!selectedCentres.length){await removeUploaded(req);return res.status(400).json({error:'Select at least one study centre.'});}
     const allowedCentres=await readProjectStudyCentres(department);
@@ -3110,23 +3372,25 @@ app.post('/api/project-work', upload.fields([
     try { scoreResult = parseScoreWorkbook(filesFor(req,'scoresFile')[0].path); }
     catch (e) { await removeUploaded(req); return res.status(400).json({ error: e.message }); }
     const claimedGroupCount=parseFlexiblePositiveCount(text(req,'groupCount'));
-    const groupNumbers=projectUniqueGroupNumbersFromRows(scoreResult.rows);
+    const groupUnits=projectGroupUnitsFromRows(scoreResult.rows,{studyCentres:selectedCentres}),groupNumbers=groupUnits.map(unit=>unit.label);
     const completedProjectWorkCount=filesFor(req,'completedWork').length;
     if(!claimedGroupCount){await removeUploaded(req);return res.status(400).json({error:'Enter Total Number of Groups Submitting as a number or words, for example 8, eight, eight (8), or eight(8).'});}
     if(groupNumbers.length!==claimedGroupCount || completedProjectWorkCount!==claimedGroupCount){
-      const parts=[`Claim form/portal total: ${claimedGroupCount}`,`Distinct groups in score sheet: ${groupNumbers.length}`,`Completed project works attached: ${completedProjectWorkCount}`];
+      const parts=[`Claim form/portal total: ${claimedGroupCount}`,`Distinct programme-centre-group combinations in score sheet: ${groupNumbers.length}`,`Completed project works attached: ${completedProjectWorkCount}`];
       await removeUploaded(req);
       return res.status(400).json({error:`The number being claimed cannot be different from the completed supervised project works. ${parts.join(' · ')}. Correct the Total Number of Groups Submitting, GROUP NO. entries, or project-work attachments before submitting.`});
     }
+    if(groupUnits.some(unit=>!unit.classified)&&selectedCentres.length>1){await removeUploaded(req);return res.status(400).json({error:'Every group must be identifiable by programme and study-centre code when multiple centres are selected.'});}
+    const claimantName=buildDisplayName(text(req,'title'),text(req,'firstName'),text(req,'middleName'),text(req,'lastName')),claimantCertification=newClaimantCertification({name:claimantName,email:text(req,'email'),staffId:text(req,'staffId')});
     const record = {
       id: crypto.randomUUID(), portalType: 'project-work', department, departmentName: DEPARTMENTS[department].name,
       reference: makeReference('PWORK'), submittedAt: new Date().toISOString(),
-      title:text(req,'title'), firstName:text(req,'firstName'), lastName:text(req,'lastName'),
-      fullName:buildDisplayName(text(req,'title'),text(req,'firstName'),text(req,'lastName')),
-      phone: text(req,'phone'), email: text(req,'email'), groupCount: text(req,'groupCount'), claimedGroupCount, studyCentres:selectedCentres, studyCentre:selectedCentres.join(' | '),
+      title:text(req,'title'), firstName:text(req,'firstName'), middleName:text(req,'middleName'), lastName:text(req,'lastName'),
+      fullName:claimantName,
+      phone: text(req,'phone'), email: text(req,'email'), staffId:text(req,'staffId'), claimantCertification:claimantCertification.certification, groupCount: text(req,'groupCount'), claimedGroupCount, studyCentres:selectedCentres, studyCentre:selectedCentres.join(' | '),
       projectStream: selectedCentres.length===1 && selectedCentres[0] === 'Non-Residential' ? 'non-residential' : 'distance',
       scoreSheet: { worksheet: scoreResult.sheetName, headerRow: scoreResult.headerRow, rowCount: scoreResult.rows.length, rows: scoreResult.rows },
-      groupValidation:{claimedGroupCount,scoreSheetGroupCount:groupNumbers.length,groupNumbers,completedProjectWorkCount,valid:true,validatedAt:new Date().toISOString()},
+      groupValidation:{claimedGroupCount,scoreSheetGroupCount:groupNumbers.length,groupNumbers,groupKeys:groupUnits.map(unit=>unit.key),countingRule:'Programme Code + Study Centre Code + Group Number',completedProjectWorkCount,valid:true,validatedAt:new Date().toISOString()},
       reviewStatus:'pending', reviewNote:'', reviewedAt:null, reviewedBy:'', reviewHistory:[],
       files: {
         claimForm: fileRecord(filesFor(req,'claimForm')[0]), reportFile: fileRecord(filesFor(req,'reportFile')[0]),
@@ -3134,7 +3398,8 @@ app.post('/api/project-work', upload.fields([
       }
     };
     await saveRecord(record);
-    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName, scoreRowsIncluded:scoreResult.rows.length, projectStream:record.projectStream, reviewStatus:'pending', reviewStatusLabel:'Pending Verification' });
+    const certificationDelivery=await dispatchClaimantCertification(record,claimantCertification.token,req);
+    res.status(201).json({ ok:true, reference:record.reference, submittedAt:record.submittedAt, departmentName:record.departmentName, scoreRowsIncluded:scoreResult.rows.length, projectStream:record.projectStream, reviewStatus:'pending', reviewStatusLabel:'Pending Verification',claimantCertificationStatus:'pending',certificationEmailSent:certificationDelivery.emailSent,certificationEmailError:certificationDelivery.emailError||null });
   } catch (e) { console.error(e); await removeUploaded(req).catch(()=>{}); res.status(500).json({ error:'The project work submission could not be saved.' }); }
 });
 
@@ -3148,6 +3413,8 @@ app.post('/api/field-experience', upload.fields([
     if (!department) { await removeUploaded(req); return res.status(400).json({ error: 'Please select a valid department.' }); }
     const missing = requireText(req, ['title','firstName','lastName','phone','email','groupCount','assessmentType']);
     if (missing) { await removeUploaded(req); return res.status(400).json({ error: `Missing required field: ${missing}` }); }
+    if(!isEmail(text(req,'email'))){await removeUploaded(req);return res.status(400).json({error:'Enter a valid claimant email address.'});}
+    if(!declarationAccepted(req.body?.claimantDeclaration)){await removeUploaded(req);return res.status(400).json({error:'Tick the claimant declaration before submitting the claim.'});}
     const assessmentType=text(req,'assessmentType');
     const assessmentSpec=fieldAssessmentSpec(assessmentType);
     if(!assessmentSpec){await removeUploaded(req);return res.status(400).json({error:'Please select a valid Field Experience or Teaching Practice assessment type.'});}
@@ -3169,13 +3436,14 @@ app.post('/api/field-experience', upload.fields([
     const claimedCandidateCount=parseFlexiblePositiveCount(text(req,'groupCount'));
     if(!claimedCandidateCount){await removeUploaded(req);return res.status(400).json({error:'Enter Number of Students / Candidates as a positive number.'});}
     if(claimedCandidateCount!==scoreResult.rows.length){await removeUploaded(req);return res.status(400).json({error:`The number being claimed cannot be different from the extracted score rows. Claim form/portal total: ${claimedCandidateCount} · Score rows extracted: ${scoreResult.rows.length}. Correct the Number of Students / Candidates or the score sheet before submitting.`});}
+    const claimantName=buildDisplayName(text(req,'title'),text(req,'firstName'),text(req,'middleName'),text(req,'lastName')),claimantCertification=newClaimantCertification({name:claimantName,email:text(req,'email'),staffId:text(req,'staffId')});
     const record = {
       id: crypto.randomUUID(), portalType: 'field-experience', department, departmentName: DEPARTMENTS[department].name,
       reference: makeReference('FIELD'), submittedAt: new Date().toISOString(),
       assessmentType, assessmentLabel:assessmentSpec.label,
-      title:text(req,'title'), firstName:text(req,'firstName'), lastName:text(req,'lastName'),
-      fullName:buildDisplayName(text(req,'title'),text(req,'firstName'),text(req,'lastName')),
-      phone: text(req,'phone'), email: text(req,'email'), groupCount: text(req,'groupCount'), claimedCandidateCount, studyCentres:selectedCentres, studyCentre:selectedCentres.join(' | '),
+      title:text(req,'title'), firstName:text(req,'firstName'), middleName:text(req,'middleName'), lastName:text(req,'lastName'),
+      fullName:claimantName,
+      phone: text(req,'phone'), email: text(req,'email'), staffId:text(req,'staffId'), claimantCertification:claimantCertification.certification, groupCount: text(req,'groupCount'), claimedCandidateCount, studyCentres:selectedCentres, studyCentre:selectedCentres.join(' | '),
       scoreSheet: {
         worksheet: scoreResult.sheetName,
         headerRow: scoreResult.headerRow,
@@ -3188,6 +3456,7 @@ app.post('/api/field-experience', upload.fields([
       files: { scoresFile: fileRecord(filesFor(req,'scoresFile')[0]), claimForm: fileRecord(filesFor(req,'claimForm')[0]) }
     };
     await saveRecord(record);
+    const certificationDelivery=await dispatchClaimantCertification(record,claimantCertification.token,req);
     res.status(201).json({
       ok:true,
       reference:record.reference,
@@ -3198,7 +3467,7 @@ app.post('/api/field-experience', upload.fields([
       scoreRowsIncluded:scoreResult.rows.length,
       studyCentres:selectedCentres,
       reviewStatus:'pending',
-      reviewStatusLabel:'Pending Verification'
+      reviewStatusLabel:'Pending Verification',claimantCertificationStatus:'pending',certificationEmailSent:certificationDelivery.emailSent,certificationEmailError:certificationDelivery.emailError||null
     });
   } catch (e) {
     console.error(e);
@@ -3238,16 +3507,16 @@ app.post('/api/dissertation', upload.fields([
     catch(e){await removeUploaded(req);return res.status(400).json({error:e.message||String(e)});}
     const all=await readDb();
     const parent=dissertationLineageParent(all,department,text(req,'indexNumber'),submissionType);
-    const studentName=buildDisplayName(text(req,'studentTitle'),text(req,'studentFirstName'),text(req,'studentLastName'));
-    const supervisorName=buildDisplayName(text(req,'supervisorTitle'),text(req,'supervisorFirstName'),text(req,'supervisorLastName'));
+    const studentName=buildDisplayName(text(req,'studentTitle'),text(req,'studentFirstName'),text(req,'studentMiddleName'),text(req,'studentLastName'));
+    const supervisorName=buildDisplayName(text(req,'supervisorTitle'),text(req,'supervisorFirstName'),text(req,'supervisorMiddleName'),text(req,'supervisorLastName'));
     const id=crypto.randomUUID();
     const record={
       id,portalType:'dissertation',submissionType,department,departmentName:DEPARTMENTS[department].name,
       reference:makeReference(submissionType==='final'?'DFINAL':submissionType==='revised'?'DREV':'DISS'),submittedAt:new Date().toISOString(),processingStatus:'received',
       lineageId:parent?.lineageId||parent?.id||id,previousSubmissionId:parent?.id||null,previousDissertationTopic:parent?.dissertationTopic||'',
-      studentTitle:text(req,'studentTitle'),studentFirstName:text(req,'studentFirstName'),studentLastName:text(req,'studentLastName'),studentName,
+      studentTitle:text(req,'studentTitle'),studentFirstName:text(req,'studentFirstName'),studentMiddleName:text(req,'studentMiddleName'),studentLastName:text(req,'studentLastName'),studentName,
       indexNumber:text(req,'indexNumber'),phone:text(req,'phone'),email:text(req,'email'),
-      supervisorTitle:text(req,'supervisorTitle'),supervisorFirstName:text(req,'supervisorFirstName'),supervisorLastName:text(req,'supervisorLastName'),supervisorName,
+      supervisorTitle:text(req,'supervisorTitle'),supervisorFirstName:text(req,'supervisorFirstName'),supervisorMiddleName:text(req,'supervisorMiddleName'),supervisorLastName:text(req,'supervisorLastName'),supervisorName,
       programme:text(req,'programme'),dissertationTopic:text(req,'dissertationTopic'),titleValidation,
       files:{dissertationFile:fileRecord(dissertationFile),reviewerResponses:reviewerResponses.map(fileRecord),turnitinReport:turnitinReport?fileRecord(turnitinReport):null}
     };
@@ -3287,6 +3556,7 @@ app.get('/api/assessor/assignment-context/:token', async(req,res)=>{
     departmentName:assignment.departmentName,
     assessorTitle:assignment.assessorTitle||'',
     assessorFirstName:assignment.assessorFirstName||'',
+    assessorMiddleName:assignment.assessorMiddleName||'',
     assessorLastName:assignment.assessorLastName||'',
     assessorName:assignment.assessorName||'',
     assessorEmail:assignment.assessorEmail||'',
@@ -3303,6 +3573,7 @@ app.get('/api/assessor/assignment-context/:token', async(req,res)=>{
         workNo:i+1,
         studentSubmissionId:r.id,
         studentFirstName:r.studentFirstName||'',
+        studentMiddleName:r.studentMiddleName||'',
         studentLastName:r.studentLastName||'',
         studentName:r.studentName||'',
         indexNumber:r.indexNumber||'',
@@ -3343,6 +3614,7 @@ app.post('/api/assessor/assignment/:token/works/:dissertationId', assignmentWork
       if(existing){await removeUploaded(req);return res.status(409).json({error:`This work has already been submitted under reference ${existing.record.reference}. If a replacement is required, contact the department administrator.`});}
       const phone=text(req,'phone');
       if(!phone){await removeUploaded(req);return res.status(400).json({error:`Enter the ${((assignment.assignmentType||'assessment')==='vetting')?'vetter':'assessor'} telephone number before submitting this work.`});}
+      if(!declarationAccepted(req.body?.claimantDeclaration)){await removeUploaded(req);return res.status(400).json({error:'Tick the claimant declaration before submitting this claim.'});}
       const report=filesFor(req,'reportFile')[0];
       const claim=filesFor(req,'claimForm')[0];
       const scoreSheet=filesFor(req,'scoreSheet')[0];
@@ -3353,7 +3625,7 @@ app.post('/api/assessor/assignment/:token/works/:dissertationId', assignmentWork
       const workNo=Math.max(1,(assignment.dissertationIds||[]).map(String).indexOf(dissertationId)+1);
       const work={
         workNo,
-        studentFirstName:student.studentFirstName||'',studentLastName:student.studentLastName||'',studentName:student.studentName||'',
+        studentFirstName:student.studentFirstName||'',studentMiddleName:student.studentMiddleName||'',studentLastName:student.studentLastName||'',studentName:student.studentName||'',
         indexNumber:student.indexNumber||'',programme:student.programme||'',studentEmail:student.email||'',studentSubmissionId:student.id,studentSubmissionType:student.submissionType||'fresh',
         files:{reportFile:fileRecord(report),claimForm:fileRecord(claim),scoreSheet:fileRecord(scoreSheet),dissertationFile:reviewed?fileRecord(reviewed):null}
       };
@@ -3363,8 +3635,8 @@ app.post('/api/assessor/assignment/:token/works/:dissertationId', assignmentWork
         reference:makeReference(reportType==='vetting'?'VET':'ASSESS'),submittedAt,
         assignmentId:assignment.id,assignmentReference:assignment.reference,assignmentWorkId:student.id,assignmentWorkNo:workNo,assignmentTotalWorks:(assignment.dissertationIds||[]).length,
         earlyBirdQualified,earlyBirdDueAt:assignment.earlyBirdDueAt||null,assessmentDueAt:assignment.assessmentDueAt||null,
-        assessorTitle:assignment.assessorTitle||'',assessorFirstName:assignment.assessorFirstName||'',assessorLastName:assignment.assessorLastName||'',assessorName:assignment.assessorName||'',
-        phone,email:assignment.assessorEmail||'',workCount:1,works:[work],studentName:work.studentName,indexNumber:work.indexNumber,programme:work.programme,
+        assessorTitle:assignment.assessorTitle||'',assessorFirstName:assignment.assessorFirstName||'',assessorMiddleName:assignment.assessorMiddleName||'',assessorLastName:assignment.assessorLastName||'',assessorName:assignment.assessorName||'',
+        phone,email:assignment.assessorEmail||'',staffId:text(req,'staffId'),claimantCertification:newClaimantCertification({name:assignment.assessorName||'',email:assignment.assessorEmail||'',staffId:text(req,'staffId'),verified:true,channel:'secure-assignment-link'}).certification,workCount:1,works:[work],studentName:work.studentName,indexNumber:work.indexNumber,programme:work.programme,
         claimReviewStatus:'pending',claimReviewNote:'',claimReviewedAt:null,claimReviewedBy:'',claimReviewHistory:[],
         files:{reportFile:[work.files.reportFile],claimForm:[work.files.claimForm],scoreSheet:[work.files.scoreSheet],dissertationFile:work.files.dissertationFile?[work.files.dissertationFile]:[]}
       };
@@ -3405,15 +3677,18 @@ app.post('/api/assessor', upload.fields(assessorUploadFields), async (req, res) 
 
     if(!['assessment','vetting'].includes(reportType)){await removeUploaded(req);return res.status(400).json({error:'Invalid report submission type.'});}
 
-    let assessorTitle=text(req,'assessorTitle'), assessorFirstName=text(req,'assessorFirstName'), assessorLastName=text(req,'assessorLastName'), assessorEmail=text(req,'email');
+    let assessorTitle=text(req,'assessorTitle'), assessorFirstName=text(req,'assessorFirstName'), assessorMiddleName=text(req,'assessorMiddleName'), assessorLastName=text(req,'assessorLastName'), assessorEmail=text(req,'email');
     if(assignment){
       assessorTitle=assignment.assessorTitle||'';
       assessorFirstName=assignment.assessorFirstName||'';
+      assessorMiddleName=assignment.assessorMiddleName||'';
       assessorLastName=assignment.assessorLastName||'';
       assessorEmail=assignment.assessorEmail||'';
     }
     const phone=text(req,'phone');
     if(!assessorTitle||!assessorFirstName||!assessorLastName||!assessorEmail||!phone){await removeUploaded(req);return res.status(400).json({error:'Assessor title, first name, surname, telephone number and email are required.'});}
+    if(!isEmail(assessorEmail)){await removeUploaded(req);return res.status(400).json({error:'Enter a valid claimant email address.'});}
+    if(!declarationAccepted(req.body?.claimantDeclaration)){await removeUploaded(req);return res.status(400).json({error:'Tick the claimant declaration before submitting the claim.'});}
 
     const workCount=assignment ? linkedDissertations.length : Number.parseInt(text(req,'workCount'),10);
     if (!Number.isInteger(workCount) || workCount < 1 || workCount > 25) {
@@ -3422,10 +3697,11 @@ app.post('/api/assessor', upload.fields(assessorUploadFields), async (req, res) 
 
     const works=[];
     for(let i=0;i<workCount;i++){
-      let studentFirstName,studentLastName,indexNumber,programme,studentEmail='',studentSubmissionId=null,studentSubmissionType='';
+      let studentFirstName,studentMiddleName,studentLastName,indexNumber,programme,studentEmail='',studentSubmissionId=null,studentSubmissionType='';
       if(assignment){
         const student=linkedDissertations[i];
         studentFirstName=student.studentFirstName||'';
+        studentMiddleName=student.studentMiddleName||'';
         studentLastName=student.studentLastName||'';
         indexNumber=student.indexNumber||'';
         programme=student.programme||'';
@@ -3434,6 +3710,7 @@ app.post('/api/assessor', upload.fields(assessorUploadFields), async (req, res) 
         studentSubmissionType=student.submissionType||'fresh';
       }else{
         studentFirstName=text(req,`studentFirstName_${i}`);
+        studentMiddleName=text(req,`studentMiddleName_${i}`);
         studentLastName=text(req,`studentLastName_${i}`);
         indexNumber=text(req,`indexNumber_${i}`);
         programme=text(req,`programme_${i}`);
@@ -3446,21 +3723,22 @@ app.post('/api/assessor', upload.fields(assessorUploadFields), async (req, res) 
       if(!report||!claim||!scoreSheet){await removeUploaded(req);return res.status(400).json({error:`Work ${i+1} requires one ${reportType==='vetting'?'vetting':'assessment'} report, one claim form and one score sheet.`});}
       works.push({
         workNo:i+1,
-        studentFirstName,studentLastName,
-        studentName:buildDisplayName('',studentFirstName,studentLastName),
+        studentFirstName,studentMiddleName,studentLastName,
+        studentName:buildDisplayName('',studentFirstName,studentMiddleName,studentLastName),
         indexNumber,programme,
         studentEmail,studentSubmissionId,studentSubmissionType,
         files:{reportFile:fileRecord(report),claimForm:fileRecord(claim),scoreSheet:fileRecord(scoreSheet),dissertationFile:dissertation?fileRecord(dissertation):null}
       });
     }
 
+    const assessorName=buildDisplayName(assessorTitle,assessorFirstName,assessorMiddleName,assessorLastName),claimantCertification=newClaimantCertification({name:assessorName,email:assessorEmail,staffId:text(req,'staffId')});
     const record={
       id:crypto.randomUUID(), portalType:'assessor', reportType, department, departmentName:DEPARTMENTS[department].name,
       reference:makeReference(reportType==='vetting'?'VET':'ASSESS'), submittedAt:new Date().toISOString(),
       assignmentId:assignment?.id||null, assignmentReference:assignment?.reference||'',
-      assessorTitle, assessorFirstName, assessorLastName,
-      assessorName:buildDisplayName(assessorTitle,assessorFirstName,assessorLastName),
-      phone, email:assessorEmail, workCount,
+      assessorTitle, assessorFirstName, assessorMiddleName, assessorLastName,
+      assessorName,
+      phone, email:assessorEmail, staffId:text(req,'staffId'), claimantCertification:claimantCertification.certification, workCount,
       works,
       studentName:works.map(w=>w.studentName).join('; '),
       indexNumber:works.map(w=>w.indexNumber).join('; '),
@@ -3474,7 +3752,8 @@ app.post('/api/assessor', upload.fields(assessorUploadFields), async (req, res) 
       }
     };
     await saveRecord(record);
-    res.status(201).json({ok:true,reference:record.reference,submittedAt:record.submittedAt,departmentName:record.departmentName,reportType,workCount,assignmentLinked:Boolean(assignment),reportFiles:works.length,claimForms:works.length,dissertationFiles:works.filter(w=>w.files.dissertationFile).length});
+    const certificationDelivery=await dispatchClaimantCertification(record,claimantCertification.token,req);
+    res.status(201).json({ok:true,reference:record.reference,submittedAt:record.submittedAt,departmentName:record.departmentName,reportType,workCount,assignmentLinked:Boolean(assignment),reportFiles:works.length,claimForms:works.length,dissertationFiles:works.filter(w=>w.files.dissertationFile).length,claimantCertificationStatus:'pending',certificationEmailSent:certificationDelivery.emailSent,certificationEmailError:certificationDelivery.emailError||null});
   } catch(e){console.error(e);await removeUploaded(req).catch(()=>{});res.status(500).json({error:'The report submission could not be saved.'});}
 });
 
@@ -3514,13 +3793,13 @@ function assessorClaimReviewStatus(record) {
   return PROJECT_REVIEW_STATUSES.has(raw)?raw:'pending';
 }
 function departmentPaymentApprovalStatus(record) {
-  return record?.portalType==='assessor'?assessorClaimReviewStatus(record):projectReviewStatus(record);
+  const raw=String(record?.paymentApproval?.status||'').trim().toLowerCase();return ['pending','approved','returned','invalidated'].includes(raw)?raw:'pending';
 }
 function departmentPaymentApprovedAt(record) {
-  return record?.portalType==='assessor'?(record.claimReviewedAt||''):(record.reviewedAt||'');
+  return record?.paymentApproval?.approvedAt||'';
 }
 function departmentPaymentApprovedBy(record) {
-  return record?.portalType==='assessor'?(record.claimReviewedBy||''):(record.reviewedBy||'');
+  return record?.paymentApproval?.approvedBy||'';
 }
 function supervisorIdentityKey(record) {
   const email=String(record?.email||'').trim().toLowerCase();
@@ -3842,11 +4121,29 @@ function projectApprovedRegisterAoA(records, stream='all') {
   const body=approvedProjectRegisterRecords(records,stream).map((r,i)=>{const gv=projectGroupValidation(r);const claim=Array.isArray(r.files?.claimForm)?r.files.claimForm[0]:r.files?.claimForm;return [i+1,r.reference,r.reviewedAt||'',r.fullName,r.phone,r.email,studyCentreDisplay(r),projectStream(r)==='non-residential'?'Non-Residential (Regular)':'Distance',r.groupCount||'',gv.claimedGroupCount||'',gv.scoreSheetGroupCount,gv.completedProjectWorkCount,approvedProjectScoreRows(r).length,claim?.originalName||'',gv.valid?'MATCH':'REQUIRES RECONCILIATION',r.reviewedBy||''];});
   return [h,...body];
 }
-function payrollStatusLabel(record){return {pending:'Pending Payroll Verification',verified:'Verified','approved-for-payment':'Approved for Payment',paid:'Paid',queried:'Queried / On Hold'}[String(record?.payroll?.status||'pending')]||'Pending Payroll Verification';}
-function approvedPaymentClaimRecords(records){
-  return records.filter(record=>['project-work','field-experience','assessor'].includes(record.portalType||'project-work')&&departmentPaymentApprovalStatus(record)==='approved').slice().sort((a,b)=>String(departmentPaymentApprovedAt(a)||a.submittedAt||'').localeCompare(String(departmentPaymentApprovedAt(b)||b.submittedAt||''))||String(a.reference||'').localeCompare(String(b.reference||'')));
+function paymentConsolidationApproved(record){return record?.portalType==='assessor'?assessorClaimReviewStatus(record)==='approved':projectReviewStatus(record)==='approved';}
+function paymentUnitData(record){
+  if(record?.portalType==='assessor'){
+    const works=Array.isArray(record.works)?record.works:[],units=works.map((work,index)=>{const ready=Boolean(work?.files?.reportFile&&work?.files?.scoreSheet&&work?.files?.claimForm);return {key:`work:${index}:${normalizeIndexNumber(work?.indexNumber)||index+1}`,label:`Work ${work?.workNo||index+1} · ${work?.studentName||work?.indexNumber||'Student'}`,eligible:ready,reason:ready?'':'Report, score sheet or claim form is missing'};}),claimedQuantity=Math.max(0,Number(record.workCount||works.length||0));return {units,claimedQuantity,maxPayable:Math.min(claimedQuantity,units.filter(unit=>unit.eligible).length),validation:paymentClaimValidation(record)};
+  }
+  if(record?.portalType==='field-experience'){
+    const rows=fieldValidScoreRowsWithMeta(record).filter(row=>row.included!==false),units=rows.map((row,index)=>({key:`candidate:${row.sourceIndex}:${normalizeIndexNumber(row.registrationNo)||index+1}`,label:`${row.registrationNo||`Candidate ${index+1}`} · ${row.name||'Name not recorded'}`,eligible:true})),claimedQuantity=Number(record?.claimedCandidateCount||parseFlexiblePositiveCount(record?.groupCount)||0);return {units,claimedQuantity,maxPayable:Math.min(claimedQuantity,units.length),validation:paymentClaimValidation(record)};
+  }
+  const validation=projectGroupValidation(record,{approved:true}),units=(validation.groupUnits||[]).map(unit=>({key:`group:${unit.key}`,label:unit.label,eligible:unit.classified!==false,reason:unit.classified===false?'Programme or centre could not be identified':''})),claimedQuantity=Number(validation.claimedGroupCount||0);return {units,claimedQuantity,maxPayable:Math.min(claimedQuantity,validation.completedProjectWorkCount,units.filter(unit=>unit.eligible).length),validation};
 }
-function auditorVisibleClaimRecords(records){return approvedPaymentClaimRecords(records).filter(record=>['approved-for-payment','paid'].includes(String(record?.payroll?.status||'')));}
+function paymentApprovalDocuments(record){return Array.isArray(record?.paymentApproval?.documents)?record.paymentApproval.documents:[];}
+function paymentApprovalView(record){const approval=record?.paymentApproval||{},documents=paymentApprovalDocuments(record);return {status:departmentPaymentApprovalStatus(record),approvedAt:approval.approvedAt||null,approvedBy:approval.approvedBy||'',approvedByEmail:approval.approvedByEmail||'',approvedQuantity:Number(approval.approvedQuantity||0),claimedQuantity:Number(approval.claimedQuantity||0),paymentType:approval.paymentType||'',adjustmentReason:approval.adjustmentReason||'',verificationCode:approval.verificationCode||'',currentDocumentId:approval.currentDocumentId||null,returnedAt:approval.returnedAt||null,returnedBy:approval.returnedBy||'',returnReason:approval.returnReason||'',invalidatedAt:approval.invalidatedAt||null,invalidationReason:approval.invalidationReason||'',approvedUnits:Array.isArray(approval.approvedUnits)?approval.approvedUnits:[],documents:documents.map(document=>({id:document.id,originalName:document.originalName,status:document.status||'superseded',createdAt:document.createdAt,approvedAt:document.approvedAt,approvedBy:document.approvedBy,approvedQuantity:document.approvedQuantity,claimedQuantity:document.claimedQuantity,paymentType:document.paymentType,verificationCode:document.verificationCode,sha256:document.sha256,downloadUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/approved-claim/${encodeURIComponent(document.id)}`}))};}
+function invalidateDepartmentPaymentApproval(record,actor,now,reason,action='source-change-invalidated'){const approval=record?.paymentApproval;if(!approval||!paymentApprovalDocuments(record).length)return false;approval.status='invalidated';approval.invalidatedAt=now;approval.invalidatedBy=actor;approval.invalidationReason=reason;const current=paymentApprovalDocuments(record).find(document=>document.id===approval.currentDocumentId);if(current&&current.status==='current')current.status='invalidated';approval.history=Array.isArray(approval.history)?approval.history:[];approval.history.push({action,status:'invalidated',note:reason,at:now,by:actor,documentId:approval.currentDocumentId||null});if(approval.history.length>200)approval.history=approval.history.slice(-200);return true;}
+function claimSourceFiles(record){const out=[];const visit=(value,key)=>{if(!value)return;if(Array.isArray(value)){value.forEach((item,index)=>visit(item,`${key}[${index}]`));return;}if(typeof value==='object'){if(value.storedName){out.push({key,storedName:path.basename(value.storedName),originalName:value.originalName||'',size:Number(value.size||0)});return;}Object.entries(value).forEach(([childKey,child])=>visit(child,`${key}.${childKey}`));}};visit(record?.files,'files');return out;}
+async function sha256File(filePath){return new Promise(resolve=>{const hash=crypto.createHash('sha256'),stream=fs.createReadStream(filePath);stream.on('data',chunk=>hash.update(chunk));stream.on('error',()=>resolve('MISSING'));stream.on('end',()=>resolve(hash.digest('hex')));});}
+async function claimSourceFingerprint(record){const files=[];for(const file of claimSourceFiles(record))files.push({...file,sha256:await sha256File(path.join(FILES_DIR,file.storedName))});const source={id:record.id,reference:record.reference,portalType:record.portalType||'project-work',submittedAt:record.submittedAt,claimant:record.fullName||record.assessorName||'',email:record.email||'',staffId:record.staffId||'',groupCount:record.groupCount||'',claimedGroupCount:record.claimedGroupCount||null,claimedCandidateCount:record.claimedCandidateCount||null,workCount:record.workCount||null,studyCentres:projectStudyCentres(record),scoreSheet:record.scoreSheet||null,works:(record.works||[]).map(work=>({workNo:work.workNo,studentName:work.studentName,indexNumber:work.indexNumber,programme:work.programme})),scoreReviewExcludedRows:record.scoreReviewExcludedRows||[],fieldScoreReviewExcludedRows:record.fieldScoreReviewExcludedRows||[],reviewStatus:projectReviewStatus(record),claimReviewStatus:assessorClaimReviewStatus(record),claimantCertification:claimantCertificationView(record),files};return crypto.createHash('sha256').update(JSON.stringify(source)).digest('hex');}
+function claimAuditView(record){const events=[];for(const item of record?.reviewHistory||[])events.push({stage:'Consolidation review',action:projectReviewLabel(item.status),note:item.note||'',at:item.reviewedAt||item.at||null,by:item.reviewedBy||item.by||''});for(const item of record?.claimReviewHistory||[])events.push({stage:'Claim verification',action:projectReviewLabel(item.status),note:item.note||'',at:item.reviewedAt||item.at||null,by:item.reviewedBy||item.by||''});for(const item of record?.claimantCertification?.history||[])events.push({stage:'Claimant certification',action:item.action||'Certification update',note:item.note||'',at:item.at||null,by:record?.claimantCertification?.claimantEmail||record?.email||''});for(const item of record?.paymentApproval?.history||[])events.push({stage:'Department payment approval',action:item.action||item.status||'Approval update',note:item.note||'',at:item.at||item.approvedAt||null,by:item.by||item.approvedBy||''});for(const item of record?.payroll?.history||[])events.push({stage:'Payroll',action:payrollStatusLabel({payroll:{status:item.status}}),note:item.note||'',at:item.updatedAt||item.at||null,by:item.updatedBy||item.by||''});return events.sort((a,b)=>String(a.at||'').localeCompare(String(b.at||'')));}
+async function hodAccountForRequest(req){if(req.adminIdentity?.master)return {error:'HoD approval requires an individual staff account. Department master credentials cannot sign claims.'};if(req.adminIdentity?.developerPreview)return {error:'Developer Preview cannot upload or apply a HoD signature.'};const account=(await readAdminUsers()).find(item=>item.id===req.adminIdentity?.id&&item.active!==false);if(!account)return {error:'Your individual staff account could not be verified.'};if(account.role!=='administrator'||!normalizeHodDepartments(account.hodDepartments,account.departments).includes(req.adminDepartment))return {error:'This account is not an authorised HoD payment approver for this department.'};return {account};}
+function payrollStatusLabel(record){return {pending:'Pending Payroll Verification',verified:'Verified','approved-for-payment':'Approved for Payment',paid:'Paid',queried:'Queried / On Hold','returned-to-department':'Returned to Department'}[String(record?.payroll?.status||'pending')]||'Pending Payroll Verification';}
+function approvedPaymentClaimRecords(records){return records.filter(record=>['project-work','field-experience','assessor'].includes(record.portalType||'project-work')&&paymentApprovalDocuments(record).length>0).slice().sort((a,b)=>String(departmentPaymentApprovedAt(a)||a.submittedAt||'').localeCompare(String(departmentPaymentApprovedAt(b)||b.submittedAt||''))||String(a.reference||'').localeCompare(String(b.reference||'')));}
+function currentDepartmentPaymentApprovedRecords(records){return approvedPaymentClaimRecords(records).filter(record=>departmentPaymentApprovalStatus(record)==='approved');}
+function payrollApprovedForPaymentRecords(records){return approvedPaymentClaimRecords(records).filter(record=>departmentPaymentApprovalStatus(record)==='approved'&&['approved-for-payment','paid'].includes(String(record?.payroll?.status||'')));}
+function auditorVisibleClaimRecords(records){return payrollApprovedForPaymentRecords(records);}
 function paymentRecordFiles(record,key){const value=record?.files?.[key];return Array.isArray(value)?value.filter(Boolean):(value?[value]:[]);}
 function paymentClaimValidation(record){
   if(record.portalType==='assessor'){
@@ -3861,7 +4158,7 @@ function paymentClaimValidation(record){
     const scoreSheetQuantity=approvedFieldExperienceScoreRows(record).length;
     return {claimedQuantity,scoreSheetQuantity,supportingWorkCount:null,claimFormCount:paymentRecordFiles(record,'claimForm').length,valid:Boolean(claimedQuantity)&&claimedQuantity===scoreSheetQuantity,label:'Candidate check'};
   }
-  const validation=projectGroupValidation(record);
+  const validation=projectGroupValidation(record,{approved:true});
   return {claimedQuantity:validation.claimedGroupCount,scoreSheetQuantity:validation.scoreSheetGroupCount,supportingWorkCount:validation.completedProjectWorkCount,claimFormCount:paymentRecordFiles(record,'claimForm').length,valid:validation.valid,label:'Group check',groupNumbers:validation.groupNumbers};
 }
 function payrollClaimRow(record){
@@ -3870,16 +4167,17 @@ function payrollClaimRow(record){
   const workType=isAssessor?(reportType==='vetting'?'Dissertation Vetting':'Dissertation Assessment'):(isField?'Field Experience and Teaching Practice':'Undergraduate Project Work');
   const activityKey=isAssessor?`dissertation-${reportType}`:(isField?(record.assessmentType||'field-experience'): 'project-work');
   const category=isAssessor?(reportType==='vetting'?'Vetting Report':'Assessment Report'):(isField?fieldAssessmentLabel(record):(projectStream(record)==='non-residential'?'Non-Residential (Regular)':'Distance'));
-  const claimFormPresent=isAssessor?claims.length>=validation.claimedQuantity:Boolean(claims[0]);
-  return {id:record.id,department:record.department,departmentName:record.departmentName||DEPARTMENTS[record.department]?.name||record.department,portalType:isAssessor?'assessor':(isField?'field-experience':'project-work'),activityKey,activityGroup:isAssessor?'dissertation':(isField?'field-experience':'project-work'),workType,reference:record.reference,approvedAt:departmentPaymentApprovedAt(record),approvedBy:departmentPaymentApprovedBy(record),supervisorName:isAssessor?(record.assessorName||''):(record.fullName||''),email:record.email||'',phone:record.phone||'',studyCentres:isAssessor?'':studyCentreDisplay(record),contextLabel:isAssessor?([record.studentName,record.programme].filter(Boolean).join(' · ')) : studyCentreDisplay(record),category,studentStream:category,claimedGroupsRaw:record.groupCount||record.workCount||'',claimedGroupCount:validation.claimedQuantity,scoreSheetGroupCount:validation.scoreSheetQuantity,completedProjectWorkCount:validation.supportingWorkCount,claimedQuantity:validation.claimedQuantity,scoreSheetQuantity:validation.scoreSheetQuantity,supportingWorkCount:validation.supportingWorkCount,groupValidation:validation,validation,approvedScoreRows:isAssessor?validation.scoreSheetQuantity:(isField?approvedFieldExperienceScoreRows(record).length:approvedProjectScoreRows(record).length),claimFormName:claims.map(item=>item.originalName||'Claim form').join(', '),claimFormCount:claims.length,claimFormPresent,claimPreviewUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/claim-preview`,payrollStatus:String(record?.payroll?.status||'pending'),payrollStatusLabel:payrollStatusLabel(record),payrollNote:record?.payroll?.note||'',payrollUpdatedAt:record?.payroll?.updatedAt||null,payrollUpdatedBy:record?.payroll?.updatedBy||''};
+  const claimFormPresent=isAssessor?claims.length>=validation.claimedQuantity:Boolean(claims[0]),approval=paymentApprovalView(record),currentDocument=approval.documents.find(document=>document.id===approval.currentDocumentId)||approval.documents.at(-1)||null;
+  return {id:record.id,department:record.department,departmentName:record.departmentName||DEPARTMENTS[record.department]?.name||record.department,portalType:isAssessor?'assessor':(isField?'field-experience':'project-work'),activityKey,activityGroup:isAssessor?'dissertation':(isField?'field-experience':'project-work'),workType,reference:record.reference,approvedAt:departmentPaymentApprovedAt(record),approvedBy:departmentPaymentApprovedBy(record),supervisorName:isAssessor?(record.assessorName||''):(record.fullName||''),email:record.email||'',phone:record.phone||'',studyCentres:isAssessor?'':studyCentreDisplay(record),contextLabel:isAssessor?([record.studentName,record.programme].filter(Boolean).join(' · ')) : studyCentreDisplay(record),category,studentStream:category,claimedGroupsRaw:record.groupCount||record.workCount||'',claimedGroupCount:validation.claimedQuantity,scoreSheetGroupCount:validation.scoreSheetQuantity,completedProjectWorkCount:validation.supportingWorkCount,claimedQuantity:validation.claimedQuantity,departmentApprovedQuantity:approval.approvedQuantity,paymentType:approval.paymentType,adjustmentReason:approval.adjustmentReason,scoreSheetQuantity:validation.scoreSheetQuantity,supportingWorkCount:validation.supportingWorkCount,groupValidation:validation,validation,approvedScoreRows:isAssessor?validation.scoreSheetQuantity:(isField?approvedFieldExperienceScoreRows(record).length:approvedProjectScoreRows(record).length),claimFormName:claims.map(item=>item.originalName||'Claim form').join(', '),claimFormCount:claims.length,claimFormPresent,claimPreviewUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/claim-preview`,departmentPaymentStatus:approval.status,departmentPaymentStatusLabel:{approved:'Approved for Payment',returned:'Returned by Payroll',invalidated:'Approval Invalidated',pending:'Pending HoD Approval'}[approval.status]||approval.status,approvedClaimUrl:currentDocument?.downloadUrl||'',approvedClaimName:currentDocument?.originalName||'',verificationCode:approval.verificationCode||currentDocument?.verificationCode||'',auditUrl:`/api/admin/${encodeURIComponent(record.department)}/submissions/${encodeURIComponent(record.id)}/claim-audit`,payrollStatus:String(record?.payroll?.status||'pending'),payrollStatusLabel:payrollStatusLabel(record),payrollNote:record?.payroll?.note||'',payrollUpdatedAt:record?.payroll?.updatedAt||null,payrollUpdatedBy:record?.payroll?.updatedBy||''};
 }
 function payrollRegisterAoA(records,scope='payroll'){
-  const h=['S/N','WORKFLOW','CATEGORY / STREAM','REFERENCE','DEPARTMENT APPROVED AT','CLAIMANT','EMAIL','PHONE','STUDY CENTRE / SUBMISSION','CLAIMED QUANTITY','APPROVED SCORE QUANTITY','SUPPORTING DOCUMENTS','RECONCILIATION','CLAIM FORM','PAYROLL STATUS','PAYROLL NOTE','PAYROLL UPDATED AT','PAYROLL UPDATED BY'];
-  const source=scope==='auditor'?auditorVisibleClaimRecords(records):approvedPaymentClaimRecords(records);
-  const body=source.map((record,i)=>{const x=payrollClaimRow(record);return [i+1,x.workType,x.category,x.reference,x.approvedAt,x.supervisorName,x.email,x.phone,x.contextLabel||x.studyCentres,x.claimedQuantity||x.claimedGroupsRaw,x.scoreSheetQuantity,x.supportingWorkCount??'',x.validation.valid?'MATCH':'REQUIRES RECONCILIATION',x.claimFormName,x.payrollStatusLabel,x.payrollNote,x.payrollUpdatedAt||'',x.payrollUpdatedBy||''];});
+  const h=['S/N','WORKFLOW','CATEGORY / STREAM','REFERENCE','DEPARTMENT APPROVED AT','DEPARTMENT APPROVED BY','CLAIMANT','EMAIL','PHONE','STUDY CENTRE / SUBMISSION','CLAIMED QUANTITY','DEPARTMENT PAYABLE QUANTITY','PAYMENT TYPE','ADJUSTMENT REASON','APPROVED SCORE QUANTITY','SUPPORTING DOCUMENTS','RECONCILIATION','CLAIM FORM','VERIFICATION CODE','DEPARTMENT PAYMENT STATUS','PAYROLL STATUS','PAYROLL NOTE','PAYROLL UPDATED AT','PAYROLL UPDATED BY'];
+  const source=scope==='auditor'||scope==='payroll-approved'?payrollApprovedForPaymentRecords(records):scope==='department-payment'?currentDepartmentPaymentApprovedRecords(records):approvedPaymentClaimRecords(records);
+  const body=source.map((record,i)=>{const x=payrollClaimRow(record);return [i+1,x.workType,x.category,x.reference,x.approvedAt,x.approvedBy,x.supervisorName,x.email,x.phone,x.contextLabel||x.studyCentres,x.claimedQuantity||x.claimedGroupsRaw,x.departmentApprovedQuantity,x.paymentType,x.adjustmentReason,x.scoreSheetQuantity,x.supportingWorkCount??'',x.validation.valid?'MATCH':'REQUIRES RECONCILIATION',x.claimFormName,x.verificationCode,x.departmentPaymentStatusLabel,x.payrollStatusLabel,x.payrollNote,x.payrollUpdatedAt||'',x.payrollUpdatedBy||''];});
   return [h,...body];
 }
 function resetPayrollAfterDepartmentChange(record,actor,now,reason){
+  invalidateDepartmentPaymentApproval(record,actor,now,reason);
   if(!record?.payroll||String(record.payroll.status||'pending')==='pending')return;
   record.payroll={...record.payroll,status:'pending',note:reason,updatedAt:now,updatedBy:actor};
   record.payroll.history=Array.isArray(record.payroll.history)?record.payroll.history:[];
@@ -3944,8 +4242,10 @@ function workbookBuffer(kind,records) {
   if(kind==='project-register') addSheet(wb,'Distance Project Register',projectRegisterAoA(records,'distance'),[8,22,24,32,18,30,22,22,24,20,24,24,24,28,38]);
   if(kind==='project-approved-register') addSheet(wb,'Approved Distance Register',projectApprovedRegisterAoA(records,'distance'),[8,22,24,34,18,30,34,24,26,22,24,26,22,32,28,28]);
   if(kind==='non-residential-project-approved-register') addSheet(wb,'Approved Non-Residential',projectApprovedRegisterAoA(records,'non-residential'),[8,22,24,34,18,30,34,24,26,22,24,26,22,32,28,28]);
-  if(kind==='payroll-register') addSheet(wb,'Payroll Register',payrollRegisterAoA(records,'payroll'),[8,34,28,22,24,34,30,18,34,20,24,24,28,32,28,38,24,28]);
-  if(kind==='auditor-register') addSheet(wb,'Auditor Claims Register',payrollRegisterAoA(records,'auditor'),[8,34,28,22,24,34,30,18,34,20,24,24,28,32,28,38,24,28]);
+  if(kind==='payroll-register') addSheet(wb,'All Department Signed Claims',payrollRegisterAoA(records,'payroll'),[8,30,24,22,24,30,30,28,18,32,18,22,16,38,22,22,28,32,22,24,28,38,24,28]);
+  if(kind==='department-payment-register') addSheet(wb,'Department Approved Payment',payrollRegisterAoA(records,'department-payment'),[8,30,24,22,24,30,30,28,18,32,18,22,16,38,22,22,28,32,22,24,28,38,24,28]);
+  if(kind==='payroll-approved-register') addSheet(wb,'Payroll Approved Payment',payrollRegisterAoA(records,'payroll-approved'),[8,30,24,22,24,30,30,28,18,32,18,22,16,38,22,22,28,32,22,24,28,38,24,28]);
+  if(kind==='auditor-register') addSheet(wb,'Auditor Claims Register',payrollRegisterAoA(records,'auditor'),[8,30,24,22,24,30,30,28,18,32,18,22,16,38,22,22,28,32,22,24,28,38,24,28]);
   if(kind==='non-residential-project-register') addSheet(wb,'Non-Residential Register',projectRegisterAoA(records,'non-residential'),[8,22,24,32,18,30,22,22,24,20,24,24,24,28,38]);
   if(kind==='project-master') {
     addSheet(wb,'Master Distance Project Scores',scoreSheetAoA(records),[10,48,34,24,16,16]);
@@ -4024,7 +4324,7 @@ function adminRecordsMap(records, assignments=[]) {
     return {
       id:r.id,reference:r.reference,submittedAt:r.submittedAt,portalType:r.portalType||'project-work',
       name:r.fullName||r.studentName||r.assessorName||'',secondaryName:r.portalType==='assessor'?r.studentName:(r.portalType==='dissertation'?r.supervisorName:''),
-      title:r.title||r.studentTitle||r.assessorTitle||'',firstName:r.firstName||r.studentFirstName||r.assessorFirstName||'',lastName:r.lastName||r.studentLastName||r.assessorLastName||'',
+      title:r.title||r.studentTitle||r.assessorTitle||'',firstName:r.firstName||r.studentFirstName||r.assessorFirstName||'',middleName:r.middleName||r.studentMiddleName||r.assessorMiddleName||'',lastName:r.lastName||r.studentLastName||r.assessorLastName||'',
       email:r.email||'',phone:r.phone||'',programme:r.programme||'',studyCentre:(r.portalType==='project-work'||!r.portalType||r.portalType==='field-experience')?studyCentreDisplay(r):(r.studyCentre||''),studyCentres:(r.portalType==='project-work'||!r.portalType||r.portalType==='field-experience')?projectStudyCentres(r):[],projectStream:(r.portalType==='project-work'||!r.portalType)?projectStream(r):'',assessmentType:r.portalType==='field-experience'?(r.assessmentType||'legacy'):'',assessmentLabel:r.portalType==='field-experience'?fieldAssessmentLabel(r):'',scoreRows:r.portalType==='field-experience'?fieldValidScoreRows(r).length:validScoreRows(r).length,scoreRowsIncluded:(r.portalType==='project-work'||!r.portalType)?approvedProjectScoreRows(r).length:(r.portalType==='field-experience'?approvedFieldExperienceScoreRows(r).length:validScoreRows(r).length),
       projectReviewStatus:projectReviewStatus(r),projectReviewLabel:projectReviewLabel(projectReviewStatus(r)),projectReviewNote:r.reviewNote||'',projectReviewedAt:r.reviewedAt||null,projectReviewedBy:r.reviewedBy||'',projectWarnings:(r.portalType==='project-work'||!r.portalType)?projectSubmissionWarnings(r,records):[],projectReturnEmailStatus:r.reviewReturnEmailStatus||'',projectReturnEmailSentAt:r.reviewReturnEmailSentAt||null,projectReturnEmailError:r.reviewReturnEmailError||'',projectReturnEmailRecipient:r.reviewReturnEmailRecipient||'',
       fieldReviewStatus:projectReviewStatus(r),fieldReviewLabel:projectReviewLabel(projectReviewStatus(r)),fieldReviewNote:r.reviewNote||'',fieldReviewedAt:r.reviewedAt||null,fieldReviewedBy:r.reviewedBy||'',fieldWarnings:r.portalType==='field-experience'?fieldExperienceSubmissionWarnings(r,records):[],fieldReturnEmailStatus:r.reviewReturnEmailStatus||'',fieldReturnEmailSentAt:r.reviewReturnEmailSentAt||null,fieldReturnEmailError:r.reviewReturnEmailError||'',fieldReturnEmailRecipient:r.reviewReturnEmailRecipient||'',
@@ -4034,6 +4334,7 @@ function adminRecordsMap(records, assignments=[]) {
       reviewerResponseCount:Array.isArray(r.files?.reviewerResponses)?r.files.reviewerResponses.length:0,turnitinReportPresent:Boolean(r.files?.turnitinReport),
       assessorName:r.assessorName||'',workCount:r.workCount||1,reportType:r.reportType||'assessment',assignmentId:r.assignmentId||null,assignmentReference:r.assignmentReference||'',
       claimReviewStatus:assessorClaimReviewStatus(r),claimReviewLabel:projectReviewLabel(assessorClaimReviewStatus(r)),claimReviewNote:r.claimReviewNote||'',claimReviewedAt:r.claimReviewedAt||null,claimReviewedBy:r.claimReviewedBy||'',
+      claimantCertificationStatus:claimantCertificationView(r).status,claimantCertifiedAt:claimantCertificationView(r).verifiedAt,paymentApprovalStatus:departmentPaymentApprovalStatus(r),paymentApproval:paymentApprovalView(r),
       assignmentWorkNo:r.assignmentWorkNo||null,assignmentTotalWorks:r.assignmentTotalWorks||null,earlyBirdQualified:Boolean(r.earlyBirdQualified),
       assignmentCount:info.count,assignmentLimit,assignedAssessors:info.assessors,assignmentRole:submissionType==='revised'?'vetter':submissionType==='fresh'?'assessor':'none',
       reportFileCount:Array.isArray(r.files?.reportFile)?r.files.reportFile.length:(r.files?.reportFile?1:0),claimFormCount:Array.isArray(r.files?.claimForm)?r.files.claimForm.length:(r.files?.claimForm?1:0),scoreSheetCount:Array.isArray(r.files?.scoreSheet)?r.files.scoreSheet.length:(r.files?.scoreSheet?1:0),
@@ -4054,6 +4355,7 @@ function collectStoredFiles(record) {
   };
   visit(record?.files);
   visit(record?.works);
+  visit(record?.paymentApproval?.documents);
   return [...new Set(out)];
 }
 async function deleteDepartmentSubmissions(department, ids) {
@@ -4116,11 +4418,11 @@ app.get('/secure/dissertations/:token', async (req, res) => {
     const reviewerCount=Array.isArray(r.files?.reviewerResponses)?r.files.reviewerResponses.length:0;
     const revised=(r.submissionType||'fresh')==='revised';
     const downloadButtons=downloadActive?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0"><a href="/secure/dissertations/${encodeURIComponent(req.params.token)}/works/${encodeURIComponent(r.id)}/dissertation" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:9px 12px;border-radius:7px;font-weight:700">Download ${revised?'Revised ':''}Dissertation</a>${revised&&reviewerCount?`<a href="/secure/dissertations/${encodeURIComponent(req.params.token)}/works/${encodeURIComponent(r.id)}/package" style="display:inline-block;background:#5b6670;color:#fff;text-decoration:none;padding:9px 12px;border-radius:7px;font-weight:700">Download Work Package (${reviewerCount} response${reviewerCount===1?'':'s'})</a>`:''}</div>`:`<div style="margin:12px 0;padding:10px 12px;background:#fff4dd;border:1px solid #ecd7a3;border-radius:7px;color:#795600"><strong>Download period ended.</strong> Report submission remains available until the 8-week due date.</div>`;
-    const statusBlock=submitted?`<div style="margin-top:14px;padding:14px;background:#eaf7ef;border:1px solid #b9dfc9;border-radius:8px;color:#12683d"><strong>✓ Submitted</strong><br>Reference: ${htmlEscape(found.record.reference)}<br>Submitted: ${htmlEscape(new Date(submittedAt).toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short',timeZone:'UTC'}))} UTC${earlyBird?'<br><strong>Early Bird ✓</strong>':''}</div>`:`<form class="work-submit-form" data-work-id="${htmlEscape(r.id)}" style="margin-top:16px;padding-top:14px;border-top:1px solid #dde5eb"><div class="upload-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px"><label style="display:grid;gap:5px;font-weight:700;font-size:13px">${taskTitle} Report *<input name="reportFile" type="file" accept=".pdf,.doc,.docx" required style="padding:9px;border:1px solid #c9d3db;border-radius:7px"></label><label style="display:grid;gap:5px;font-weight:700;font-size:13px">Claim Form *<input name="claimForm" type="file" accept=".pdf,.doc,.docx" required style="padding:9px;border:1px solid #c9d3db;border-radius:7px"></label><label style="display:grid;gap:5px;font-weight:700;font-size:13px">Score Sheet *<input name="scoreSheet" type="file" accept=".xlsx,.xls,.csv,.pdf,.doc,.docx" required style="padding:9px;border:1px solid #c9d3db;border-radius:7px"></label><label style="display:grid;gap:5px;font-weight:700;font-size:13px">Reviewed Dissertation <span style="font-weight:400;color:#657584">Optional</span><input name="dissertationFile" type="file" accept=".pdf,.doc,.docx" style="padding:9px;border:1px solid #c9d3db;border-radius:7px"></label></div><button type="submit" style="margin-top:12px;background:#137a45;color:#fff;border:0;border-radius:7px;padding:10px 15px;font-weight:800;cursor:pointer">Submit Work ${i+1}</button><div class="work-message" aria-live="polite" style="margin-top:9px;font-size:13px"></div></form>`;
+    const statusBlock=submitted?`<div style="margin-top:14px;padding:14px;background:#eaf7ef;border:1px solid #b9dfc9;border-radius:8px;color:#12683d"><strong>✓ Submitted</strong><br>Reference: ${htmlEscape(found.record.reference)}<br>Submitted: ${htmlEscape(new Date(submittedAt).toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short',timeZone:'UTC'}))} UTC${earlyBird?'<br><strong>Early Bird ✓</strong>':''}</div>`:`<form class="work-submit-form" data-work-id="${htmlEscape(r.id)}" style="margin-top:16px;padding-top:14px;border-top:1px solid #dde5eb"><div class="upload-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px"><label style="display:grid;gap:5px;font-weight:700;font-size:13px">${taskTitle} Report *<input name="reportFile" type="file" accept=".pdf,.doc,.docx" required style="padding:9px;border:1px solid #c9d3db;border-radius:7px"></label><label style="display:grid;gap:5px;font-weight:700;font-size:13px">Claim Form *<input name="claimForm" type="file" accept=".pdf,.doc,.docx" required style="padding:9px;border:1px solid #c9d3db;border-radius:7px"></label><label style="display:grid;gap:5px;font-weight:700;font-size:13px">Score Sheet *<input name="scoreSheet" type="file" accept=".xlsx,.xls,.csv,.pdf,.doc,.docx" required style="padding:9px;border:1px solid #c9d3db;border-radius:7px"></label><label style="display:grid;gap:5px;font-weight:700;font-size:13px">Reviewed Dissertation <span style="font-weight:400;color:#657584">Optional</span><input name="dissertationFile" type="file" accept=".pdf,.doc,.docx" style="padding:9px;border:1px solid #c9d3db;border-radius:7px"></label></div><label style="display:flex;gap:9px;align-items:flex-start;margin-top:14px;padding:12px;background:#f7fafc;border:1px solid #d7e0e7;border-radius:8px;font-size:13px"><input name="claimantDeclaration" type="checkbox" value="accepted" required style="margin-top:2px"><span>${CLAIMANT_DECLARATION} My secure assignment account identifies this certification.</span></label><button type="submit" style="margin-top:12px;background:#137a45;color:#fff;border:0;border-radius:7px;padding:10px 15px;font-weight:800;cursor:pointer">Submit Work ${i+1}</button><div class="work-message" aria-live="polite" style="margin-top:9px;font-size:13px"></div></form>`;
     return `<section style="background:#fff;border:1px solid #d8e1e8;border-radius:12px;padding:20px;margin:16px 0;box-shadow:0 2px 8px rgba(8,43,76,.04)"><div style="display:flex;justify-content:space-between;gap:15px;align-items:flex-start"><div><span style="font-size:12px;font-weight:800;color:#a57900;text-transform:uppercase">Work ${i+1} · ${revised?'Revised':'Fresh'} submission</span><h3 style="margin:5px 0;color:#082b4c">${htmlEscape(r.studentName||'Student')}</h3><div style="color:#526575;font-size:14px">${htmlEscape(r.indexNumber||'')} · ${htmlEscape(r.programme||'')}</div></div><span style="border-radius:999px;padding:6px 10px;font-size:12px;font-weight:800;${submitted?'background:#e8f6ee;color:#12683d':'background:#fff4dd;color:#8a5b00'}">${submitted?'Submitted':'Pending'}</span></div><p style="margin:12px 0 4px;color:#34495a"><strong>Title:</strong> ${htmlEscape(r.dissertationTopic||'')}</p>${revised?`<p style="margin:5px 0;color:#526575;font-size:13px">Reviewer response files linked: <strong>${reviewerCount}</strong></p>`:''}${downloadButtons}${statusBlock}</section>`;
   }).join('');
   const phoneValue=htmlEscape(a.assessorPhone||'');
-  res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${taskTitle} Assignment</title></head><body style="font-family:Arial,sans-serif;background:#f4f7fa;color:#182431;margin:0"><main style="max-width:900px;margin:38px auto;padding:0 16px 50px"><section style="background:#fff;padding:28px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.07)"><div style="font-size:12px;text-transform:uppercase;color:#d4a72c;font-weight:bold">University of Cape Coast</div><h1 style="color:#082b4c;font-size:28px;margin-bottom:6px">Your ${taskTitle} Assignment</h1><p style="margin-top:0;color:#526575">${htmlEscape(a.departmentName)} · ${htmlEscape(a.reference)}</p><p>Dear <strong>${htmlEscape(a.assessorName)}</strong>, you have <strong>${selected.length}</strong> assigned dissertation${selected.length===1?'':'s'}.</p><div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#eef5f9;padding:14px;border-radius:10px;margin:18px 0"><strong style="font-size:20px;color:#082b4c">${completion.submittedCount} of ${completion.total} submitted</strong><span style="color:#526575">${completion.pendingCount} pending</span></div><div style="margin:18px 0;padding:14px 16px;background:#fff7dc;border:1px solid #ead58c;border-radius:8px"><strong>${taskTitle} timeline</strong><p style="margin:7px 0">Early Bird per work: submit by <strong>${htmlEscape(early)}</strong>.</p><p style="margin:7px 0">Final ${taskLabel} deadline: <strong>${htmlEscape(due)}</strong>.</p><p style="margin:7px 0">Dissertation download access: <strong>${htmlEscape(expiry)}</strong>.</p></div>${downloadActive?`<a href="/secure/dissertations/${encodeURIComponent(req.params.token)}/download" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 17px;border-radius:8px;font-weight:bold">Download All ${selected.length} Work${selected.length===1?'':'s'} as ZIP</a>`:''}<div style="margin-top:20px;max-width:420px"><label style="display:grid;gap:6px;font-weight:800">${taskTitle==='Vetting'?'Vetter':'Assessor'} Telephone Number *<input id="assessorPhone" value="${phoneValue}" placeholder="Enter once for report submissions" style="font:inherit;padding:10px 11px;border:1px solid #bcc9d3;border-radius:8px"></label><small style="color:#657584">Student details are securely linked and cannot be edited.</small></div></section><div>${cards}</div></main><script>const assignmentToken=${JSON.stringify(req.params.token).replace(/</g,'\u003c')};document.querySelectorAll('.work-submit-form').forEach(form=>{form.addEventListener('submit',async e=>{e.preventDefault();const msg=form.querySelector('.work-message'),btn=form.querySelector('button[type="submit"]'),phone=document.getElementById('assessorPhone').value.trim();if(!phone){msg.style.color='#a12f2f';msg.textContent='Enter the assessor/vetter telephone number above.';document.getElementById('assessorPhone').focus();return;}if(!form.reportValidity())return;const fd=new FormData(form);fd.append('phone',phone);btn.disabled=true;msg.style.color='#526575';msg.textContent='Uploading and saving this report…';try{const r=await fetch('/api/assessor/assignment/'+encodeURIComponent(assignmentToken)+'/works/'+encodeURIComponent(form.dataset.workId),{method:'POST',body:fd});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'The report could not be submitted.');msg.style.color='#12683d';msg.textContent='Submitted successfully. Updating progress…';setTimeout(()=>location.reload(),600);}catch(err){msg.style.color='#a12f2f';msg.textContent=err.message||'The report could not be submitted.';btn.disabled=false;}});});</script></body></html>`);
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${taskTitle} Assignment</title></head><body style="font-family:Arial,sans-serif;background:#f4f7fa;color:#182431;margin:0"><main style="max-width:900px;margin:38px auto;padding:0 16px 50px"><section style="background:#fff;padding:28px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.07)"><div style="font-size:12px;text-transform:uppercase;color:#d4a72c;font-weight:bold">University of Cape Coast</div><h1 style="color:#082b4c;font-size:28px;margin-bottom:6px">Your ${taskTitle} Assignment</h1><p style="margin-top:0;color:#526575">${htmlEscape(a.departmentName)} · ${htmlEscape(a.reference)}</p><p>Dear <strong>${htmlEscape(a.assessorName)}</strong>, you have <strong>${selected.length}</strong> assigned dissertation${selected.length===1?'':'s'}.</p><div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#eef5f9;padding:14px;border-radius:10px;margin:18px 0"><strong style="font-size:20px;color:#082b4c">${completion.submittedCount} of ${completion.total} submitted</strong><span style="color:#526575">${completion.pendingCount} pending</span></div><div style="margin:18px 0;padding:14px 16px;background:#fff7dc;border:1px solid #ead58c;border-radius:8px"><strong>${taskTitle} timeline</strong><p style="margin:7px 0">Early Bird per work: submit by <strong>${htmlEscape(early)}</strong>.</p><p style="margin:7px 0">Final ${taskLabel} deadline: <strong>${htmlEscape(due)}</strong>.</p><p style="margin:7px 0">Dissertation download access: <strong>${htmlEscape(expiry)}</strong>.</p></div>${downloadActive?`<a href="/secure/dissertations/${encodeURIComponent(req.params.token)}/download" style="display:inline-block;background:#082b4c;color:#fff;text-decoration:none;padding:12px 17px;border-radius:8px;font-weight:bold">Download All ${selected.length} Work${selected.length===1?'':'s'} as ZIP</a>`:''}<div style="margin-top:20px;max-width:420px;display:grid;gap:12px"><label style="display:grid;gap:6px;font-weight:800">${taskTitle==='Vetting'?'Vetter':'Assessor'} Telephone Number *<input id="assessorPhone" value="${phoneValue}" placeholder="Enter once for report submissions" style="font:inherit;padding:10px 11px;border:1px solid #bcc9d3;border-radius:8px"></label><label style="display:grid;gap:6px;font-weight:800">Staff / Payroll ID <span style="font-weight:400;color:#657584">Optional</span><input id="assessorStaffId" placeholder="Used in electronic certification" style="font:inherit;padding:10px 11px;border:1px solid #bcc9d3;border-radius:8px"></label><small style="color:#657584">Student details are securely linked and cannot be edited.</small></div></section><div>${cards}</div></main><script>const assignmentToken=${JSON.stringify(req.params.token).replace(/</g,'\u003c')};document.querySelectorAll('.work-submit-form').forEach(form=>{form.addEventListener('submit',async e=>{e.preventDefault();const msg=form.querySelector('.work-message'),btn=form.querySelector('button[type="submit"]'),phone=document.getElementById('assessorPhone').value.trim(),staffId=document.getElementById('assessorStaffId').value.trim();if(!phone){msg.style.color='#a12f2f';msg.textContent='Enter the assessor/vetter telephone number above.';document.getElementById('assessorPhone').focus();return;}if(!form.reportValidity())return;const fd=new FormData(form);fd.append('phone',phone);fd.append('staffId',staffId);btn.disabled=true;msg.style.color='#526575';msg.textContent='Uploading and saving this report…';try{const r=await fetch('/api/assessor/assignment/'+encodeURIComponent(assignmentToken)+'/works/'+encodeURIComponent(form.dataset.workId),{method:'POST',body:fd});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'The report could not be submitted.');msg.style.color='#12683d';msg.textContent='Submitted successfully. Updating progress…';setTimeout(()=>location.reload(),600);}catch(err){msg.style.color='#a12f2f';msg.textContent=err.message||'The report could not be submitted.';btn.disabled=false;}});});</script></body></html>`);
 });
 
 app.get('/secure/dissertations/:token/works/:dissertationId/dissertation', async(req,res)=>{
@@ -4509,11 +4811,15 @@ app.post('/api/developer/study-centre-directory/reset', developerAuth, async(_re
 
 app.get('/api/developer/admin-users', developerAuth, async(_req,res)=>res.json((await readAdminUsers()).map(publicAdminUser)));
 app.post('/api/developer/admin-users', developerAuth, async(req,res)=>{
-  const name=cleanHumanText(req.body?.name).slice(0,160),email=cleanHumanText(req.body?.email).toLowerCase().slice(0,254);
+  const firstName=cleanHumanText(req.body?.firstName).slice(0,100);
+  const middleName=cleanHumanText(req.body?.middleName).slice(0,100);
+  const lastName=cleanHumanText(req.body?.lastName).slice(0,100);
+  const name=(buildDisplayName('',firstName,middleName,lastName)||cleanHumanText(req.body?.name)).slice(0,160),email=cleanHumanText(req.body?.email).toLowerCase().slice(0,254);
   const requestedUsername=cleanHumanText(req.body?.username).toLowerCase().slice(0,100);
   const username=requestedUsername || email;
-  const role=String(req.body?.role||'viewer').trim();const departments=normalizeAdminDepartments(req.body?.departments);const sections=normalizeAdminSections(req.body?.sections);const units=normalizeStaffUnits(req.body?.units);
-  if(!name||!isEmail(email)||!username)return res.status(400).json({error:'Administrator name and a valid email address are required.'});
+  const role=String(req.body?.role||'viewer').trim();const departments=normalizeAdminDepartments(req.body?.departments);const hodDepartments=role==='administrator'?normalizeHodDepartments(req.body?.hodDepartments,departments):[];const sections=normalizeAdminSections(req.body?.sections);const units=normalizeStaffUnits(req.body?.units);
+  if((firstName||middleName||lastName)&&(!firstName||!lastName))return res.status(400).json({error:'The staff member’s first name and surname are required.'});
+  if(!name||!isEmail(email)||!username)return res.status(400).json({error:'Administrator first name, surname and a valid email address are required.'});
   if(!/^[a-z0-9._@-]+$/i.test(username))return res.status(400).json({error:'Username may contain letters, numbers, dots, underscores, @ and hyphens only.'});
   if(!ADMIN_ROLES.has(role))return res.status(400).json({error:'Select a valid role.'});
   if(!departments.length&&!units.length)return res.status(400).json({error:'Assign at least one functional unit or department.'});
@@ -4521,7 +4827,7 @@ app.post('/api/developer/admin-users', developerAuth, async(req,res)=>{
   await mutateAdminUsers(list=>{
     if(list.some(a=>String(a.username||'').toLowerCase()===username)){error='That administrator username already exists.';return null;}
     if(list.some(a=>String(a.email||'').toLowerCase()===email)){error='That administrator email address already has an account.';return null;}
-    created={id:crypto.randomUUID(),name,email,username,role,departments,sections,units,active:true,createdAt:new Date().toISOString(),invitationTokenHash:invitation.tokenHash,invitationExpiresAt:invitation.expiresAt,invitationEmailStatus:'pending'};
+    created={id:crypto.randomUUID(),firstName,middleName,lastName,name,email,username,role,departments,hodDepartments,sections,units,active:true,createdAt:new Date().toISOString(),invitationTokenHash:invitation.tokenHash,invitationExpiresAt:invitation.expiresAt,invitationEmailStatus:'pending'};
     list.push(created);return created;
   });
   if(error)return res.status(400).json({error});
@@ -4557,8 +4863,8 @@ app.post('/api/developer/admin-users/:id/resend-invitation', developerAuth, asyn
   }
 });
 app.patch('/api/developer/admin-users/:id', developerAuth, async(req,res)=>{
-  const role=req.body?.role?String(req.body.role).trim():null;const departments=req.body?.departments!==undefined?normalizeAdminDepartments(req.body.departments):null;const sections=req.body?.sections!==undefined?normalizeAdminSections(req.body.sections):null;const units=req.body?.units!==undefined?normalizeStaffUnits(req.body.units):null;
-  let item=null;await mutateAdminUsers(list=>{const a=list.find(x=>x.id===req.params.id);if(!a)return null;if(role&&ADMIN_ROLES.has(role))a.role=role;if(departments!==null)a.departments=departments;if(sections!==null)a.sections=sections;if(units!==null)a.units=units;if(req.body?.active!==undefined)a.active=Boolean(req.body.active);if(!(a.departments||[]).length&&!normalizeStaffUnits(a.units).length)return null;item=publicAdminUser(a);return item;});
+  const role=req.body?.role?String(req.body.role).trim():null;const departments=req.body?.departments!==undefined?normalizeAdminDepartments(req.body.departments):null;const sections=req.body?.sections!==undefined?normalizeAdminSections(req.body.sections):null;const units=req.body?.units!==undefined?normalizeStaffUnits(req.body.units):null;const requestedHodDepartments=req.body?.hodDepartments!==undefined?normalizeAdminDepartments(req.body.hodDepartments):null;
+  let item=null;await mutateAdminUsers(list=>{const a=list.find(x=>x.id===req.params.id);if(!a)return null;if(role&&ADMIN_ROLES.has(role))a.role=role;if(departments!==null)a.departments=departments;if(sections!==null)a.sections=sections;if(units!==null)a.units=units;if(requestedHodDepartments!==null)a.hodDepartments=requestedHodDepartments;if(req.body?.active!==undefined)a.active=Boolean(req.body.active);a.hodDepartments=a.role==='administrator'?normalizeHodDepartments(a.hodDepartments,a.departments):[];if(!(a.departments||[]).length&&!normalizeStaffUnits(a.units).length)return null;item=publicAdminUser(a);return item;});
   if(!item)return res.status(404).json({error:'Administrator account not found.'});res.json({ok:true,user:item});
 });
 app.delete('/api/developer/admin-users/:id', developerAuth, async(req,res)=>{let removed=false;await mutateAdminUsers(list=>{const i=list.findIndex(x=>x.id===req.params.id);if(i>=0){list.splice(i,1);removed=true;}return removed;});if(!removed)return res.status(404).json({error:'Administrator account not found.'});res.json({ok:true});});
@@ -4620,8 +4926,9 @@ app.post('/api/admin/:department/dissertation-assignments', departmentAuth, requ
   const ids=Array.isArray(req.body?.ids)?[...new Set(req.body.ids.map(String))]:[];
   const assessorTitle=String(req.body?.assessorTitle||'').trim();
   const assessorFirstName=String(req.body?.assessorFirstName||'').trim();
+  const assessorMiddleName=String(req.body?.assessorMiddleName||'').trim();
   const assessorLastName=String(req.body?.assessorLastName||'').trim();
-  const assessorName=buildDisplayName(assessorTitle,assessorFirstName,assessorLastName);
+  const assessorName=buildDisplayName(assessorTitle,assessorFirstName,assessorMiddleName,assessorLastName);
   const assessorEmail=String(req.body?.assessorEmail||'').trim();
   const message=String(req.body?.message||'').trim().slice(0,4000);
   const assignmentType=String(req.body?.assignmentType||'assessment').trim().toLowerCase();
@@ -4660,7 +4967,7 @@ app.post('/api/admin/:department/dissertation-assignments', departmentAuth, requ
   const deadlines=assignmentDeadlineDates(now);
   const assignment={
     id:crypto.randomUUID(), reference:makeReference(assignmentType==='vetting'?'VETASSIGN':'ASSIGN'), department:req.adminDepartment, departmentName:req.adminDepartmentName,
-    assignmentType, assessorTitle, assessorFirstName, assessorLastName, assessorName, assessorEmail, dissertationIds:ids,
+    assignmentType, assessorTitle, assessorFirstName, assessorMiddleName, assessorLastName, assessorName, assessorEmail, dissertationIds:ids,
     createdAt:now.toISOString(), expiresAt, earlyBirdDueAt:deadlines.earlyBirdDueAt, assessmentDueAt:deadlines.assessmentDueAt, tokenHash:assignmentTokenHash(token),
     sentAt:null, downloadedAt:null, lastDownloadedAt:null, downloadCount:0, revokedAt:null, emailStatus:'pending', resendCount:0, message
   };
@@ -4887,14 +5194,21 @@ function supportSafeSheetValue(value) {
   const text = String(value ?? '').replace(/\r?\n/g, ' ').trim();
   return /^[=+\-@]/.test(text) ? `'${text}` : text;
 }
+function supportRoutingHistoryText(ticket) {
+  return (ticket.routingHistory || []).map(item => `${item.fromLabel || item.fromUnit} -> ${item.toLabel || item.toUnit} on ${item.at || 'date not recorded'} by ${item.by || 'officer not recorded'}: ${item.note || 'No reason recorded'}`).join(' | ');
+}
+function supportDecisionHistoryText(ticket) {
+  return (ticket.decisionHistory || []).map(item => `${item.label || 'Decision'} on ${item.at || 'date not recorded'} by ${item.by || item.unitLabel || 'officer not recorded'}: ${item.narrative || 'No narrative recorded'}`).join(' | ');
+}
 function supportRegisterAoA(tickets) {
-  const headers = ['S/N','REFERENCE','CREATED','LAST UPDATED','MATTER TYPE','STATUS','PRIORITY','CATEGORY','CONFIDENTIALITY','STUDENT','EMAIL','PHONE','STUDENT NUMBER','STUDY CENTRE','PROGRAMME','RESPONSIBLE UNIT','ASSIGNMENT INDICATOR','ASSIGNED STAFF','ASSIGNED STAFF EMAIL','ASSIGNMENT SENT','ASSIGNMENT OPENED','ASSIGNMENT RESOLVED','DUE','SLA','FIRST RESPONSE HOURS','RESOLUTION HOURS','OVERALL RATING','EASE OF USE','COMMUNICATION','TIMELINESS','STAFF COURTESY','RESOLVED BY STUDENT','NOTIFICATION PREFERENCE','ASSISTANCE LANGUAGE'];
+  const headers = ['S/N','REFERENCE','CREATED','LAST UPDATED','MATTER TYPE','STATUS','PRIORITY','CATEGORY','CONFIDENTIALITY','STUDENT','EMAIL','PHONE','STUDENT NUMBER','STUDY CENTRE','PROGRAMME','RESPONSIBLE UNIT','REDIRECTION HISTORY','ASSIGNMENT INDICATOR','ASSIGNED STAFF','ASSIGNED STAFF EMAIL','ASSIGNMENT SENT','ASSIGNMENT OPENED','ASSIGNMENT RESOLVED','FINAL DECISION / RESOLUTION NARRATIVE','DECIDED BY','DECISION DATE','EARLIER DECISION HISTORY','DUE','SLA','FIRST RESPONSE HOURS','RESOLUTION HOURS','OVERALL RATING','EASE OF USE','COMMUNICATION','TIMELINESS','STAFF COURTESY','RESOLVED BY STUDENT','NOTIFICATION PREFERENCE','ASSISTANCE LANGUAGE'];
   const hours=(start,end)=>start&&end?Number(Math.max(0,(new Date(end).getTime()-new Date(start).getTime())/3600000).toFixed(1)):'';
   const rows=tickets.slice().sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))).map((ticket,index)=>{
     const sla=supportSlaSummary(ticket);
     const assignment=supportAssignmentSummary(ticket,[ticket.ownerUnitId]);
+    const decision=supportDecisionSummary(ticket);
     const slaLabel=sla.overdue?'Overdue':sla.atRisk?'At risk':sla.paused?'Paused':'On track';
-    return [index+1,ticket.reference,ticket.createdAt,ticket.lastUpdatedAt,ticket.type,SUPPORT_STATUS_LABELS[ticket.status]||ticket.status,ticket.priorityLabel,ticket.categoryLabel,ticket.sensitive?'Restricted':'Standard',ticket.name,ticket.email,ticket.phone,ticket.studentNumber,ticket.studyCentre,ticket.programme,ticket.ownerUnit,assignment.label,assignment.officerName||ticket.assignedCaseOwner,assignment.officerEmail,assignment.assignedAt,assignment.openedAt,assignment.resolvedAt,ticket.dueAt,slaLabel,hours(ticket.createdAt,ticket.firstResponseAt),hours(ticket.createdAt,ticket.resolvedAt),ticket.feedback?.rating||'',ticket.feedback?.easeOfUse||'',ticket.feedback?.communication||'',ticket.feedback?.timeliness||'',ticket.feedback?.staffCourtesy||'',ticket.feedback?.resolved||'',ticket.notificationPreference||'email',SUPPORT_LANGUAGES[ticket.language]||SUPPORT_LANGUAGES.en].map(supportSafeSheetValue);
+    return [index+1,ticket.reference,ticket.createdAt,ticket.lastUpdatedAt,ticket.type,SUPPORT_STATUS_LABELS[ticket.status]||ticket.status,ticket.priorityLabel,ticket.categoryLabel,ticket.sensitive?'Restricted':'Standard',ticket.name,ticket.email,ticket.phone,ticket.studentNumber,ticket.studyCentre,ticket.programme,ticket.ownerUnit,supportRoutingHistoryText(ticket),assignment.label,assignment.officerName||ticket.assignedCaseOwner,assignment.officerEmail,assignment.assignedAt,assignment.openedAt,assignment.resolvedAt,decision?.narrative||ticket.resolution||'',decision?.by||ticket.resolvedBy||'',decision?.at||ticket.resolvedAt||'',supportDecisionHistoryText(ticket),ticket.dueAt,slaLabel,hours(ticket.createdAt,ticket.firstResponseAt),hours(ticket.createdAt,ticket.resolvedAt),ticket.feedback?.rating||'',ticket.feedback?.easeOfUse||'',ticket.feedback?.communication||'',ticket.feedback?.timeliness||'',ticket.feedback?.staffCourtesy||'',ticket.feedback?.resolved||'',ticket.notificationPreference||'email',SUPPORT_LANGUAGES[ticket.language]||SUPPORT_LANGUAGES.en].map(supportSafeSheetValue);
   });
   return [headers,...rows];
 }
@@ -4908,7 +5222,7 @@ function supportWorkbookBuffer(tickets, includeRegister = true) {
   addSheet(workbook,'Summary',[['SERVICE PERFORMANCE SUMMARY','VALUE'],['Generated at',new Date().toISOString()],['Total cases',overall.total],['Complaints',overall.complaints],['Service requests',overall.requests],['Open cases',overall.open],['Resolved or closed',overall.resolved],['Overdue',overall.overdue],['At risk',overall.atRisk],['SLA compliance %',overall.slaCompliance??''],['Feedback responses',overall.feedbackResponses],['Feedback response rate %',overall.feedbackRate??''],['Average satisfaction /5',overall.satisfaction??''],['Average resolution hours',overall.averageResolutionHours??'']],[34,24]);
   addSheet(workbook,'By Study Centre',supportPerformanceAoA(supportGroupedPerformance(tickets,'centre'),'STUDY CENTRE'),[38,12,14,18,12,18,12,12,20,20,18,18,14,20,14,14,22]);
   addSheet(workbook,'By Functional Unit',supportPerformanceAoA(supportGroupedPerformance(tickets,'unit'),'FUNCTIONAL UNIT'),[42,12,14,18,12,18,12,12,20,20,18,18,14,20,14,14,22]);
-  if (includeRegister) addSheet(workbook,'Complaint Request Register',supportRegisterAoA(tickets),[8,23,22,22,18,22,14,28,18,28,30,18,20,30,30,34,28,24,30,22,22,22,22,16,22,22,16,16,18,16,18,22,24,22]);
+  if (includeRegister) addSheet(workbook,'Complaint Request Register',supportRegisterAoA(tickets),[8,23,22,22,18,22,14,28,18,28,30,18,20,30,30,34,70,28,24,30,22,22,22,70,28,22,70,22,16,22,22,16,16,18,16,18,22,24,22]);
   return XLSX.write(workbook,{type:'buffer',bookType:'xlsx'});
 }
 function sendSupportWorkbook(res, tickets, filename, performanceOnly = false) {
@@ -4982,14 +5296,14 @@ app.get('/api/staff/support-performance.xlsx', staffAuth, async(req,res)=>{
 function staffReferralTicket(ticket, unitIds = []) {
   const activeUnitIds = normalizeStaffUnits(unitIds).filter(unitId => ticket.ownerUnitId === unitId || Boolean(activeReferralForUnits(ticket,[unitId])));
   return {
-    id: ticket.id, reference: ticket.reference, name: ticket.name, email: ticket.email, type: ticket.type,
+    id: ticket.id, reference: ticket.reference, name: ticket.name, firstName:ticket.firstName || '', middleName:ticket.middleName || '', lastName:ticket.lastName || '', email: ticket.email, type: ticket.type,
     studyLevel: ticket.studyLevelLabel || '', category: ticket.categoryLabel, priority: ticket.priorityLabel,
     status: ticket.status, statusLabel: SUPPORT_STATUS_LABELS[ticket.status] || ticket.status,
     ownerUnit: ticket.ownerUnit, subject: ticket.subject, description: ticket.description, studyCentre: ticket.studyCentre,
     lastUpdatedAt: ticket.lastUpdatedAt, dueAt: ticket.dueAt || null, assignedCaseOwner: ticket.assignedCaseOwner || '', sensitive: Boolean(ticket.sensitive), sla: supportSlaSummary(ticket), evidence: Array.isArray(ticket.evidence) ? ticket.evidence : [],
-    officerEvidence: Array.isArray(ticket.officerEvidence) ? ticket.officerEvidence : [], referrals: ticket.referrals || [], registrations:ticket.registrations || [],
+    officerEvidence: Array.isArray(ticket.officerEvidence) ? ticket.officerEvidence : [], referrals: ticket.referrals || [], registrations:ticket.registrations || [], routingHistory:ticket.routingHistory || [], routingState:supportRegistrationSummary(ticket,unitIds),
     assignment:supportAssignmentSummary(ticket,unitIds), assignments:supportAssignmentList(ticket), activeUnitIds,
-    interUnitMessages: ticket.interUnitMessages || [], studentUpdates: ticket.studentUpdates || [], auditTrail: ticket.auditTrail || [], feedback:ticket.feedback || null,
+    interUnitMessages: ticket.interUnitMessages || [], studentUpdates: ticket.studentUpdates || [], auditTrail: ticket.auditTrail || [], resolution:ticket.resolution || '', finalDecision:supportDecisionSummary(ticket), decisionHistory:ticket.decisionHistory || [], feedback:ticket.feedback || null,
     notificationPreference:ticket.notificationPreference || 'email', language:ticket.language || 'en'
   };
 }
@@ -4997,7 +5311,7 @@ app.use('/api/staff/referrals', supportSameOrigin);
 app.get('/api/staff/referrals', staffAuth, async(req, res) => {
   const unitIds = normalizeStaffUnits(req.staffIdentity?.units);
   const tickets = await readSupportTickets();
-  const referrals = tickets.filter(ticket => (!ticket.sensitive || unitIds.some(unit => ['confidential-handler','provost'].includes(unit))) && ((ticket.referrals || []).some(referral => unitIds.includes(referral.targetUnit)) || (ticket.interUnitMessages || []).some(message => unitIds.includes(message.targetUnit))))
+  const referrals = tickets.filter(ticket => (!ticket.sensitive || unitIds.some(unit => ['confidential-handler','provost'].includes(unit))) && ((ticket.referrals || []).some(referral => unitIds.includes(referral.targetUnit) || unitIds.includes(referral.sourceUnit)) || (ticket.interUnitMessages || []).some(message => unitIds.includes(message.targetUnit) || unitIds.includes(message.sourceUnit))))
     .sort((a,b) => String(b.lastUpdatedAt || b.createdAt).localeCompare(String(a.lastUpdatedAt || a.createdAt)))
     .map(ticket => staffReferralTicket(ticket, unitIds));
   res.json({ ok: true, referrals });
@@ -5010,7 +5324,7 @@ app.get('/api/staff/referrals/:id/:collection/:index', staffAuth, async(req, res
   const collection = req.params.collection === 'officer-evidence' ? 'officerEvidence' : req.params.collection === 'evidence' ? 'evidence' : '';
   if (!collection) return res.status(404).json({ error: 'Evidence file not found.' });
   const unitIds = normalizeStaffUnits(req.staffIdentity?.units);
-  const ticket = (await readSupportTickets()).find(item => item.id === req.params.id && (!item.sensitive || unitIds.some(unit => ['confidential-handler','provost'].includes(unit))) && (item.referrals || []).some(referral => unitIds.includes(referral.targetUnit)));
+  const ticket = (await readSupportTickets()).find(item => item.id === req.params.id && (!item.sensitive || unitIds.some(unit => ['confidential-handler','provost'].includes(unit))) && (item.referrals || []).some(referral => unitIds.includes(referral.targetUnit) || unitIds.includes(referral.sourceUnit)));
   if (!ticket) return res.status(404).json({ error: 'Referred case not found.' });
   const evidence = supportEvidenceFor(ticket, req.params.index, collection);
   if (!evidence) return res.status(404).json({ error: 'Evidence file not found.' });
@@ -5085,9 +5399,15 @@ app.patch('/api/staff/referrals/:id', staffAuth, async (req, res) => {
       ticket.resolvedAt = now;
       ticket.resolvedBy = actor;
       ticket.studentResponseDueAt = supportMoveWorkingDays(now, 5);
+      const completedAssignments = supportCompleteCurrentAssignments(ticket, { narrative:note, actor, at:now, status:ticket.status, source:'functional-unit-decision' });
       referral.status = 'resolved';
       referral.resolvedAt = now;
-      ticket.auditTrail.push({ action: action === 'resolve' ? 'Resolution proposed' : 'Final decision issued', note, at: now, by: actor });
+      referral.resolvedBy = actor;
+      referral.resolutionNarrative = note;
+      const colourNote = completedAssignments
+        ? `${note} ${completedAssignments} active staff assignment indicator${completedAssignments === 1 ? '' : 's'} changed to green in all authorised registers.`
+        : note;
+      ticket.auditTrail.push({ action: action === 'resolve' ? 'Resolution proposed' : 'Final decision issued', note:colourNote, at: now, by: actor, indicatorColour:'green' });
       ticket.studentUpdates.push({ label: action === 'resolve' ? 'Resolution proposed' : 'Final decision issued', message: note, at: now });
     } else {
       referral.status = 'returned-to-support';
@@ -5134,7 +5454,67 @@ app.get('/auditor/:department',departmentAuth,(req,res)=>adminCan(req,'auditor',
 app.get('/api/admin/:department/info', departmentAuth, async(req,res)=>{
   const availableDepartmentSlugs=normalizeAdminDepartments(req.adminIdentity?.departments||[req.adminDepartment]);
   const availableDepartments=(availableDepartmentSlugs.length?availableDepartmentSlugs:[req.adminDepartment]).map(slug=>({slug,name:DEPARTMENTS[slug].name}));
-  res.json({ department:req.adminDepartment, departmentName:req.adminDepartmentName, availableDepartments, admin:{name:req.adminIdentity?.name||'',username:req.adminIdentity?.username||'',role:req.adminIdentity?.role||'viewer',sections:req.adminIdentity?.sections||[],departments:availableDepartmentSlugs,master:Boolean(req.adminIdentity?.master),developerPreview:Boolean(req.adminIdentity?.developerPreview),developerPreviewLabel:req.adminIdentity?.developerPreviewLabel||'',previewExpiresAt:req.adminIdentity?.previewExpiresAt||null} });
+  res.json({ department:req.adminDepartment, departmentName:req.adminDepartmentName, availableDepartments, admin:{id:req.adminIdentity?.id||'',name:req.adminIdentity?.name||'',username:req.adminIdentity?.username||'',email:req.adminIdentity?.email||'',role:req.adminIdentity?.role||'viewer',sections:req.adminIdentity?.sections||[],departments:availableDepartmentSlugs,hodDepartments:normalizeHodDepartments(req.adminIdentity?.hodDepartments,availableDepartmentSlugs),hasHodSignature:Boolean(req.adminIdentity?.hasHodSignature),signatureUpdatedAt:req.adminIdentity?.signatureUpdatedAt||null,master:Boolean(req.adminIdentity?.master),developerPreview:Boolean(req.adminIdentity?.developerPreview),developerPreviewLabel:req.adminIdentity?.developerPreviewLabel||'',previewExpiresAt:req.adminIdentity?.previewExpiresAt||null} });
+});
+app.get('/api/admin/:department/hod-signature-profile', departmentAuth, async(req,res)=>{
+  const result=await hodAccountForRequest(req);
+  if(result.error)return res.json({authorised:false,error:result.error,department:req.adminDepartment});
+  const signature=result.account.hodSignature||{};
+  res.json({authorised:true,department:req.adminDepartment,name:result.account.name||result.account.username,email:result.account.email||'',hasSignature:Boolean(signature.storedName),signatureUpdatedAt:signature.uploadedAt||null,signatureWidth:signature.width||null,signatureHeight:signature.height||null});
+});
+app.post('/api/admin/:department/hod-signature-profile', departmentAuth, hodSignatureUpload.single('signature'), async(req,res)=>{
+  const result=await hodAccountForRequest(req);
+  if(result.error){if(req.file)await fsp.unlink(req.file.path).catch(()=>{});return res.status(403).json({error:result.error});}
+  if(!req.file)return res.status(400).json({error:'Choose a PNG or JPEG signature image.'});
+  let dimensions;
+  try{dimensions=validateSignatureImage(req.file.path);}catch(error){await fsp.unlink(req.file.path).catch(()=>{});return res.status(400).json({error:error.message||'The signature image is not supported.'});}
+  const sha256=await sha256File(req.file.path),now=new Date().toISOString();let oldStoredName='';
+  await mutateAdminUsers(accounts=>{const account=accounts.find(item=>item.id===result.account.id);if(!account)return null;oldStoredName=account.hodSignature?.storedName||'';account.hodSignature={storedName:path.basename(req.file.path),originalName:req.file.originalname,mimeType:dimensions.mimeType,size:req.file.size,width:dimensions.width,height:dimensions.height,sha256,uploadedAt:now};account.accessHistory=Array.isArray(account.accessHistory)?account.accessHistory:[];account.accessHistory.push({action:'hod-signature-uploaded',department:req.adminDepartment,at:now,by:account.name||account.username});return true;});
+  if(oldStoredName&&oldStoredName!==path.basename(req.file.path))await fsp.unlink(path.join(FILES_DIR,path.basename(oldStoredName))).catch(()=>{});
+  res.json({ok:true,hasSignature:true,signatureUpdatedAt:now,width:dimensions.width,height:dimensions.height});
+});
+app.post('/api/admin/:department/submissions/:id/resend-claim-certification', departmentAuth, async(req,res)=>{
+  const all=await readDb(),record=all.find(item=>item.id===req.params.id&&item.department===req.adminDepartment&&['project-work','field-experience','assessor'].includes(item.portalType||'project-work'));
+  if(!record)return res.status(404).json({error:'Claim submission not found in this department.'});
+  if(!requireRecordAccess(req,res,record,'officer'))return;
+  if(!isEmail(record.email))return res.status(400).json({error:'This claim does not contain a valid claimant email address.'});
+  if(claimantCertificationView(record).status==='verified')return res.json({ok:true,alreadyVerified:true});
+  const token=crypto.randomBytes(32).toString('hex'),now=new Date().toISOString();
+  record.claimantCertification={...(record.claimantCertification||{}),status:'pending',declarationText:CLAIMANT_DECLARATION,claimantName:record.fullName||record.assessorName||'',claimantEmail:record.email,staffId:record.staffId||'',tokenHash:hashOneTimeToken(token),expiresAt:new Date(Date.now()+CLAIM_CERTIFICATION_EXPIRY_DAYS*86400000).toISOString(),emailStatus:'pending'};
+  record.claimantCertification.history=Array.isArray(record.claimantCertification.history)?record.claimantCertification.history:[];record.claimantCertification.history.push({action:'certification-link-reissued',at:now,by:adminActorLabel(req)});
+  await writeDb(all);const delivery=await dispatchClaimantCertification(record,token,req);
+  if(!delivery.emailSent)return res.status(502).json({error:`The certification link was renewed, but the email could not be sent: ${delivery.emailError||'Email service error.'}`});
+  res.json({ok:true,emailSent:true,recipient:record.email,expiresAt:record.claimantCertification.expiresAt});
+});
+app.post('/api/admin/:department/claims/:id/payment-approval', departmentAuth, async(req,res)=>{
+  const all=await readDb(),record=all.find(item=>item.id===req.params.id&&item.department===req.adminDepartment&&['project-work','field-experience','assessor'].includes(item.portalType||'project-work'));
+  if(!record)return res.status(404).json({error:'Claim submission not found in this department.'});
+  if(!requireRecordAccess(req,res,record,'administrator'))return;
+  const hod=await hodAccountForRequest(req);if(hod.error)return res.status(403).json({error:hod.error});
+  const password=String(req.body?.password||'');if(!verifyPassword(password,hod.account.passwordSalt,hod.account.passwordHash))return res.status(401).json({error:'The HoD password confirmation is incorrect.'});
+  const signature=hod.account.hodSignature;if(!signature?.storedName)return res.status(400).json({error:'Upload your protected HoD signature before approving a claim for payment.'});
+  const signaturePath=path.join(FILES_DIR,path.basename(signature.storedName));if(!fs.existsSync(signaturePath))return res.status(409).json({error:'The saved HoD signature file is unavailable. Upload it again.'});
+  if(await sha256File(signaturePath)!==signature.sha256)return res.status(409).json({error:'The saved HoD signature failed its integrity check. Upload it again.'});
+  if(!paymentConsolidationApproved(record))return res.status(400).json({error:'Approve the submission for consolidation or complete claim verification before approving it for payment.'});
+  const certification=claimantCertificationView(record);if(certification.status!=='verified')return res.status(400).json({error:'The claimant must electronically certify the claim before HoD approval. Use Resend Certification if needed.'});
+  const claimForms=paymentRecordFiles(record,'claimForm');if(!claimForms.length)return res.status(400).json({error:'A claim form is required before HoD approval for payment.'});
+  const payment=paymentUnitData(record),requested=Array.isArray(req.body?.approvedUnitKeys)?req.body.approvedUnitKeys.map(String):[];
+  const eligible=new Map(payment.units.filter(unit=>unit.eligible!==false).map(unit=>[unit.key,unit])),approvedUnits=[...new Set(requested)].map(key=>eligible.get(key)).filter(Boolean);
+  if(!approvedUnits.length)return res.status(400).json({error:'Select at least one eligible item for payment.'});
+  if(approvedUnits.length>payment.maxPayable)return res.status(400).json({error:`A maximum of ${payment.maxPayable} item(s) can be approved from the verified supporting documents.`});
+  const fullPayment=payment.validation.valid&&approvedUnits.length===payment.claimedQuantity,reason=String(req.body?.adjustmentReason||'').trim().slice(0,1500);
+  if(!fullPayment&&!reason)return res.status(400).json({error:'Enter the reconciliation reason for a part-payment or quantity adjustment.'});
+  const fingerprint=await claimSourceFingerprint(record),now=new Date().toISOString(),documentId=crypto.randomUUID(),code=`UCC-${crypto.randomBytes(2).toString('hex').toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+  const actor=hod.account.name||hod.account.username,filename=`${safeBaseName(record.reference||record.id)}-approved-${Date.now()}.pdf`,storedName=`${Date.now()}-${crypto.randomBytes(6).toString('hex')}-${filename}`,outputPath=path.join(FILES_DIR,storedName);
+  const certificationLine=`Electronically certified by ${certification.claimantName}, ${certification.staffId||certification.claimantEmail}, on ${certification.verifiedAt}. Declaration: ${certification.declarationText}`;
+  const pdf=createApprovalPdf({signaturePath,data:{reference:record.reference,workType:payrollClaimRow(record).workType,department:req.adminDepartmentName,claimantName:certification.claimantName,claimantEmail:certification.claimantEmail,staffId:certification.staffId,approvedQuantity:approvedUnits.length,claimedQuantity:payment.claimedQuantity,paymentType:fullPayment?'Full payment':'Part payment / adjusted quantity',adjustmentReason:reason,approvedUnits:approvedUnits.map(unit=>unit.label),claimantCertification:certificationLine,hodName:actor,hodEmail:hod.account.email,approvedAt:now,verificationCode:code,verificationUrl:`${baseUrlFor(req)}/claim-verification.html?code=${encodeURIComponent(code)}`,sourceFingerprint:fingerprint}});
+  await fsp.writeFile(outputPath,pdf);const documentSha=crypto.createHash('sha256').update(pdf).digest('hex');
+  const prior=paymentApprovalDocuments(record);for(const document of prior)if(document.status==='current')document.status='superseded';
+  const document={id:documentId,storedName,originalName:filename,mimeType:'application/pdf',size:pdf.length,sha256:documentSha,status:'current',createdAt:now,approvedAt:now,approvedBy:actor,approvedQuantity:approvedUnits.length,claimedQuantity:payment.claimedQuantity,paymentType:fullPayment?'full':'part',verificationCode:code,sourceFingerprint:fingerprint};
+  record.paymentApproval={...(record.paymentApproval||{}),status:'approved',approvedAt:now,approvedBy:actor,approvedByEmail:hod.account.email||'',approvedByAccountId:hod.account.id,approvedQuantity:approvedUnits.length,claimedQuantity:payment.claimedQuantity,paymentType:fullPayment?'Full payment':'Part payment / adjusted quantity',adjustmentReason:reason,approvedUnits:approvedUnits.map(unit=>({key:unit.key,label:unit.label})),verificationCode:code,currentDocumentId:documentId,sourceFingerprint:fingerprint,documents:[...prior,document],returnedAt:null,returnedBy:'',returnReason:'',invalidatedAt:null,invalidationReason:''};
+  record.paymentApproval.history=Array.isArray(record.paymentApproval.history)?record.paymentApproval.history:[];record.paymentApproval.history.push({action:'approved-for-payment',status:'approved',note:reason,at:now,by:actor,documentId,approvedQuantity:approvedUnits.length,claimedQuantity:payment.claimedQuantity});
+  record.payroll={...(record.payroll||{}),status:'pending',note:'Department approved the claim for Payroll processing.',updatedAt:now,updatedBy:actor};record.payroll.history=Array.isArray(record.payroll.history)?record.payroll.history:[];record.payroll.history.push({status:'pending',note:record.payroll.note,updatedAt:now,updatedBy:actor});
+  await writeDb(all);res.json({ok:true,paymentApproval:paymentApprovalView(record),approvedClaimUrl:`/api/admin/${encodeURIComponent(req.adminDepartment)}/submissions/${encodeURIComponent(record.id)}/approved-claim/${encodeURIComponent(documentId)}`});
 });
 app.get('/api/admin/:department/submissions', departmentAuth, async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
@@ -5421,13 +5801,37 @@ app.get('/api/admin/:department/submissions/:id', departmentAuth, async(req,res)
   const r=records.find(x=>x.id===req.params.id);
   if(!r)return res.status(404).json({error:'Submission not found in this department.'});
   if(!requireRecordAccess(req,res,r,'viewer'))return;
+  const paymentData=['project-work','field-experience','assessor'].includes(r.portalType||'project-work')?paymentUnitData(r):null;
+  const common={...r,claimantCertification:claimantCertificationView(r),paymentApproval:paymentApprovalView(r),paymentUnits:paymentData?.units||[],maximumPayableQuantity:paymentData?.maxPayable||0,claimAudit:claimAuditView(r)};
   if((r.portalType||'project-work')==='project-work'){
-    return res.json({...r,reviewScoreRows:validScoreRowsWithMeta(r).map((row,i)=>({reviewNo:i+1,sourceIndex:row.sourceIndex,originalSn:row.originalSn,name:row.name,registrationNo:row.registrationNo,groupNo:row.groupNo,totalScore:row.totalScore,included:row.included})),groupValidation:projectGroupValidation(r),duplicateReconciliation:projectDuplicateReconciliation(r,records)});
+    return res.json({...common,reviewScoreRows:validScoreRowsWithMeta(r).map((row,i)=>({reviewNo:i+1,sourceIndex:row.sourceIndex,originalSn:row.originalSn,name:row.name,registrationNo:row.registrationNo,groupNo:row.groupNo,totalScore:row.totalScore,included:row.included})),groupValidation:projectGroupValidation(r),duplicateReconciliation:projectDuplicateReconciliation(r,records)});
   }
   if(r.portalType==='field-experience'){
-    return res.json({...r,assessmentLabel:fieldAssessmentLabel(r),fieldValidation:fieldClaimValidation(r),reviewFieldScoreRows:fieldValidScoreRowsWithMeta(r).map((row,i)=>({reviewNo:i+1,sourceIndex:row.sourceIndex,originalSn:row.originalSn,registrationNo:row.registrationNo,name:row.name,scoreHeaders:row.scoreHeaders,scoreValues:row.scoreValues,included:row.included!==false})),duplicateReconciliation:fieldDuplicateReconciliation(r,records)});
+    return res.json({...common,assessmentLabel:fieldAssessmentLabel(r),fieldValidation:fieldClaimValidation(r),reviewFieldScoreRows:fieldValidScoreRowsWithMeta(r).map((row,i)=>({reviewNo:i+1,sourceIndex:row.sourceIndex,originalSn:row.originalSn,registrationNo:row.registrationNo,name:row.name,scoreHeaders:row.scoreHeaders,scoreValues:row.scoreValues,included:row.included!==false})),duplicateReconciliation:fieldDuplicateReconciliation(r,records)});
   }
-  res.json(r);
+  res.json(common);
+});
+app.get('/api/admin/:department/submissions/:id/claim-audit', departmentAuth, async(req,res)=>{
+  const record=recordsForDepartment(await readDb(),req.adminDepartment).find(item=>item.id===req.params.id);
+  if(!record)return res.status(404).json({error:'Submission not found in this department.'});
+  const allowed=adminCan(req,portalSectionForRecord(record),'viewer')||adminCan(req,'payroll','viewer')||adminCan(req,'auditor','viewer');if(!allowed)return res.status(403).json({error:'You do not have access to this claim audit history.'});
+  res.json({reference:record.reference,paymentApproval:paymentApprovalView(record),events:claimAuditView(record)});
+});
+app.get('/api/admin/:department/submissions/:id/approved-claim/:documentId?', departmentAuth, async(req,res)=>{
+  const record=recordsForDepartment(await readDb(),req.adminDepartment).find(item=>item.id===req.params.id);
+  if(!record)return res.status(404).send('Submission not found in this department.');
+  const allowed=adminCan(req,portalSectionForRecord(record),'viewer')||adminCan(req,'payroll','viewer')||adminCan(req,'auditor','viewer');if(!allowed)return res.status(403).send('You do not have access to this approved claim.');
+  const documents=paymentApprovalDocuments(record),document=req.params.documentId?documents.find(item=>item.id===req.params.documentId):documents.find(item=>item.id===record.paymentApproval?.currentDocumentId);
+  if(!document)return res.status(404).send('Approved claim PDF not found.');const fp=path.join(FILES_DIR,path.basename(document.storedName));if(!fs.existsSync(fp))return res.status(404).send('Approved claim PDF is unavailable.');
+  res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Disposition',`attachment; filename="${safeBaseName(document.originalName||`${record.reference}-approved.pdf`)}"`);res.sendFile(fp);
+});
+app.get('/api/claim-verification/:code', async(req,res)=>{
+  const code=String(req.params.code||'').trim().toUpperCase(),records=await readDb();let record,document;
+  for(const item of records){const found=paymentApprovalDocuments(item).find(entry=>String(entry.verificationCode||'').toUpperCase()===code);if(found){record=item;document=found;break;}}
+  if(!record||!document)return res.status(404).json({valid:false,error:'This claim verification code was not found.'});
+  const current=document.id===record.paymentApproval?.currentDocumentId&&document.status==='current',fingerprint=await claimSourceFingerprint(record),sourceUnchanged=fingerprint===document.sourceFingerprint,status=departmentPaymentApprovalStatus(record),valid=current&&sourceUnchanged&&status==='approved';
+  let reason='Approval is valid.';if(status==='returned')reason=`Payroll returned this claim to the department${record.paymentApproval?.returnReason?`: ${record.paymentApproval.returnReason}`:''}.`;else if(status==='invalidated')reason=record.paymentApproval?.invalidationReason||'The department approval was invalidated.';else if(!current)reason='This approval PDF has been superseded or cancelled.';else if(!sourceUnchanged)reason='The source claim or approved data changed after approval.';
+  res.json({valid,reason,reference:record.reference,department:record.departmentName||DEPARTMENTS[record.department]?.name||record.department,claimant:record.fullName||record.assessorName||'',approvedAt:document.approvedAt,approvedBy:document.approvedBy,approvedQuantity:document.approvedQuantity,claimedQuantity:document.claimedQuantity,verificationCode:document.verificationCode,status});
 });
 app.get('/api/admin/:department/submissions/:id/works/:workIndex/files/:kind', departmentAuth, async(req,res)=>{
   const records=recordsForDepartment(await readDb(), req.adminDepartment);
@@ -5636,34 +6040,45 @@ app.get('/api/admin/:department/export/field-experience-master.xlsx', department
 
 // Payroll receives only department-approved Project Work, Field Experience and dissertation assessment/vetting claims.
 // Auditor access begins only after Payroll marks a claim Approved for Payment.
+app.get('/api/admin/:department/export/payment-approved-register.xlsx', departmentAuth, async(req,res)=>{
+  const canView=['project-work','field-experience','assessor'].some(section=>adminCan(req,section,'viewer'));if(!canView)return res.status(403).json({error:'Your account does not have access to departmental claims.'});
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);sendWorkbook(res,'department-payment-register',records,`${req.adminDepartment}-department-approved-for-payment-register.xlsx`);
+});
 app.get('/api/payroll/:department/claims', departmentAuth, requireAdminAccess('payroll','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(),req.adminDepartment);
   res.json(approvedPaymentClaimRecords(records).map(payrollClaimRow));
 });
 app.post('/api/payroll/:department/claims/:id/status', departmentAuth, requireAdminAccess('payroll','officer'), async(req,res)=>{
   const status=String(req.body?.status||'').trim();
-  const allowed=new Set(['pending','verified','approved-for-payment','paid','queried']);
+  const allowed=new Set(['pending','verified','approved-for-payment','paid','queried','returned-to-department']);
   if(!allowed.has(status))return res.status(400).json({error:'Choose a valid payroll processing status.'});
   const note=String(req.body?.note||'').trim().slice(0,1500);
+  if(['queried','returned-to-department'].includes(status)&&!note)return res.status(400).json({error:'Enter the query or return reason before changing this claim status.'});
   const all=await readDb();const record=all.find(r=>r.id===req.params.id&&r.department===req.adminDepartment&&['project-work','field-experience','assessor'].includes(r.portalType||'project-work'));
   if(!record)return res.status(404).json({error:'Approved departmental claim not found.'});
-  if(departmentPaymentApprovalStatus(record)!=='approved')return res.status(400).json({error:'Only submissions approved by the department can be processed for payment.'});
+  if(departmentPaymentApprovalStatus(record)!=='approved'&&status!=='pending')return res.status(400).json({error:'Only a current HoD-approved claim can be processed for payment.'});
   const validation=paymentClaimValidation(record);
   const paymentRow=payrollClaimRow(record);
   if(status==='approved-for-payment'&&!paymentRow.claimFormPresent)return res.status(400).json({error:'Every claimed activity must have a claim form before Payroll can approve this submission for payment.'});
-  if(status==='approved-for-payment'&&!validation.valid)return res.status(400).json({error:'Resolve the claimed-quantity and approved-score reconciliation before approving this claim for payment.'});
+  if(status==='approved-for-payment'&&!Number(record.paymentApproval?.approvedQuantity||0))return res.status(400).json({error:'The HoD approval does not contain a payable quantity.'});
   if(status==='paid'&&String(record?.payroll?.status||'pending')!=='approved-for-payment')return res.status(400).json({error:'Mark the claim Approved for Payment before recording it as Paid.'});
+  if(status==='returned-to-department'&&String(record?.payroll?.status||'pending')==='paid')return res.status(400).json({error:'A claim already recorded as Paid cannot be returned through this action.'});
   const now=new Date().toISOString(),by=adminActorLabel(req,'Payroll officer');
   record.payroll={...(record.payroll||{}),status,note,updatedAt:now,updatedBy:by};
   record.payroll.history=Array.isArray(record.payroll.history)?record.payroll.history:[];
   record.payroll.history.push({status,note,updatedAt:now,updatedBy:by});if(record.payroll.history.length>100)record.payroll.history=record.payroll.history.slice(-100);
+  if(status==='returned-to-department'){
+    record.paymentApproval.status='returned';record.paymentApproval.returnedAt=now;record.paymentApproval.returnedBy=by;record.paymentApproval.returnReason=note;
+    const current=paymentApprovalDocuments(record).find(document=>document.id===record.paymentApproval.currentDocumentId);if(current&&current.status==='current')current.status='returned';
+    record.paymentApproval.history=Array.isArray(record.paymentApproval.history)?record.paymentApproval.history:[];record.paymentApproval.history.push({action:'returned-by-payroll',status:'returned',note,at:now,by,documentId:record.paymentApproval.currentDocumentId||null});
+  }
   await writeDb(all);res.json({ok:true,claim:payrollClaimRow(record)});
 });
 app.get('/api/payroll/:department/register.xlsx', departmentAuth, requireAdminAccess('payroll','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(),req.adminDepartment);sendWorkbook(res,'payroll-register',records,`${req.adminDepartment}-department-approved-payroll-register.xlsx`);
 });
 app.get('/api/payroll/:department/approved-register.xlsx', departmentAuth, requireAdminAccess('payroll','viewer'), async(req,res)=>{
-  const records=recordsForDepartment(await readDb(),req.adminDepartment);sendWorkbook(res,'payroll-register',records,`${req.adminDepartment}-department-approved-claims-register.xlsx`);
+  const records=recordsForDepartment(await readDb(),req.adminDepartment);sendWorkbook(res,'payroll-approved-register',records,`${req.adminDepartment}-payroll-approved-for-payment-register.xlsx`);
 });
 app.get('/api/auditor/:department/claims', departmentAuth, requireAdminAccess('auditor','viewer'), async(req,res)=>{
   const records=recordsForDepartment(await readDb(),req.adminDepartment);res.json(auditorVisibleClaimRecords(records).map(payrollClaimRow));

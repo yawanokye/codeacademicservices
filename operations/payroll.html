@@ -13,8 +13,8 @@
 </header>
 <main>
   <section class="intro compact-intro">
-    <div><div class="eyebrow">Department-approved claims only</div><h2>Claims Processing</h2><p>Select a department and activity. Payroll receives only claims approved by that department. Approved for Payment makes the claim visible to the Auditor.</p></div>
-    <div class="actions"><a id="approvedRegister" class="btn" href="#">Department-Approved Register</a><a id="payrollRegister" class="btn primary" href="#">Payroll Register</a></div>
+    <div><div class="eyebrow">HoD-approved claims only</div><h2>Claims Processing</h2><p>Payroll receives the immutable approved PDF, payable quantity and full audit history. Return a claim to the department when reconciliation is required.</p></div>
+    <div class="actions"><a id="approvedRegister" class="btn primary" href="#">Payroll Approved for Payment Register</a><a id="payrollRegister" class="btn" href="#">All Department-Signed Claims Register</a></div>
   </section>
   <section class="card operations-card">
     <div class="operations-filters">
@@ -36,7 +36,7 @@
           <option value="dissertation-vetting">Dissertation Vetting</option>
         </optgroup>
       </select></label>
-      <label>Payroll Status<select id="statusFilter"><option value="all">All statuses</option><option value="pending">Pending Payroll Verification</option><option value="verified">Verified</option><option value="approved-for-payment">Approved for Payment</option><option value="paid">Paid</option><option value="queried">Queried / On Hold</option></select></label>
+      <label>Payroll Status<select id="statusFilter"><option value="all">All statuses</option><option value="pending">Pending Payroll Verification</option><option value="verified">Verified</option><option value="approved-for-payment">Approved for Payment</option><option value="paid">Paid</option><option value="queried">Queried / On Hold</option><option value="returned-to-department">Returned to Department</option></select></label>
       <label class="search-filter">Search<input id="search" type="search" placeholder="Reference, claimant, centre or category"></label>
     </div>
     <div class="result-count"><strong id="count">0</strong> department-approved claims</div>
@@ -51,6 +51,7 @@
   </section>
 </main>
 <dialog id="claimDialog" class="modal"><div class="modal-head"><strong id="claimTitle">Claim Form</strong><button id="closeClaim" class="close" type="button">×</button></div><iframe id="claimFrame" title="Claim form preview"></iframe></dialog>
+<dialog id="auditDialog" class="modal audit-modal"><div class="modal-head"><strong id="auditTitle">Claim Audit History</strong><button id="closeAudit" class="close" type="button">×</button></div><div id="auditBody" class="audit-body"></div></dialog>
 <script src="/operations/payroll.js"></script>
 </body>
 </html>

@@ -1,0 +1,39 @@
+CoDE Academic Services Portal v41
+
+STAFF ASSIGNMENT RELIABILITY
+
+- Assignment failures are converted into plain, actionable messages inside both the Student Support and functional-unit portals.
+- Invalid email, non-institutional email, suspended account, completed case, busy database, full storage and storage-permission failures now explain the corrective action.
+- Unexpected assignment failures are caught at the server boundary and no longer expose raw response code to the portal user.
+- First-time permanent account creation, account activation, account reuse and secure staff links remain unchanged.
+
+FINAL DECISION AND COLOUR AUDIT
+
+- New staff assignment: red.
+- Secure assignment opened by the assigned staff member: yellow.
+- Resolution checklist completed or final decision issued: green.
+- Redirected or superseded assignment: blue in the former unit's historical record.
+- Each change stores the date, officer, source and narrative.
+- Recording a final decision completes every active assignment for the current responsible unit and synchronizes the green indicator across authorised displays.
+- The colour indicator has a click-to-open panel containing its history and the recorded resolution or final-decision narrative.
+- Student ticket tracking provides a click-to-open decision narrative without exposing internal-only data.
+
+STUDENT SUPPORT REASSIGNMENT
+
+- Student Support can redirect any complaint or request visible within its authorised queue.
+- The reassignment starts from the actual current responsible unit, not Student Support's oversight registration.
+- The new unit receives the same permanent reference, evidence and history.
+- The former unit keeps a read-only blue redirected entry showing the destination, date, officer and reason.
+- Student Support remains actively registered for oversight and follow-up.
+- Prior final decisions are retained in decision history if a case is redirected for further action.
+
+DOWNLOADABLE REGISTERS
+
+- Student Support and functional-unit CSV/XLSX registers include redirection history.
+- Registers include the final decision or resolution narrative, deciding officer, decision date and earlier decision history.
+
+VERIFICATION
+
+- Syntax and protected-portal DOM contract checks pass.
+- The integration suite verifies all 19 functional units and 9 department/operations roles.
+- Tests cover readable assignment failures, institutional-email validation, permanent-account reuse, red-yellow-green transitions, final-decision synchronization, downloadable decision narratives, Student Support supervisory reassignment, the receiving-unit record and the former unit's read-only redirected record.
